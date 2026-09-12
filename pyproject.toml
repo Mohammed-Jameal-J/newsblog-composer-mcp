@@ -3,6 +3,7 @@ name = "newsblog-composer-mcp"
 version = "0.2.0"
 description = "MCP server that researches, verifies and audits news blog posts. The writer writes the prose."
 readme = "README.md"
+authors = [{ name = "Mohammed Jameal J" }]
 requires-python = ">=3.10"
 dependencies = [
   "mcp[cli]>=2.0",
@@ -17,12 +18,21 @@ dependencies = [
 
 license = "MIT"
 keywords = ["mcp", "model-context-protocol", "seo", "journalism", "schema-org", "writing"]
+# No "License :: OSI Approved" classifier here on purpose. PEP 639 sets
+# License-Expression from the `license` field above, and PyPI rejects an upload
+# that carries both. A rejected upload still burns the version number.
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: End Users/Desktop",
-  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Text Processing :: Markup :: HTML",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
 ]
 
 [project.urls]

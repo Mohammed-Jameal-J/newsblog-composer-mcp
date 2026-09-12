@@ -739,6 +739,56 @@ def test_publishing_pack() -> None:
     check("alt text ends on a word boundary",
           not pack["image_alt_text"].rstrip(".").endswith(("certificat", "-")),
           pack["image_alt_text"])
+    check("a supplied concept is marked as supplied",
+          pack["image_concept_source"] == "supplied")
+
+
+def test_derived_image_concept() -> None:
+    """With no image_concepts, the subject must still describe a picture.
+
+    The old fallback used the headline, which names the story rather than
+    describing a scene, and dragged figures into a prompt that forbids numbers
+    in the image.
+    """
+    print("\n[build_publishing_pack] image concept derived from the research")
+    pack = build_publishing_pack(
+        "Mecka AI Nears $500M Valuation in Sequoia-Led Deal Amid Rush for Robot "
+        "Training Data",
+        slug="mecka-ai-sequoia-valuation",
+        keywords=["robot training data", "human motion data", "egocentric capture"],
+        entities=["Mecka AI", "Sequoia Capital"], cfg=HOUSE)
+    subject = pack["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+
+    check("derivation is declared, not silent",
+          pack["image_concept_source"] == "derived"
+          and "derived from the researched keywords" in pack["image_concept_note"])
+    check("subject is not just the headline",
+          "nears" not in subject.lower() and "valuation" not in subject.lower(),
+          subject)
+    check("no digits in the subject, which the constraints forbid in the image",
+          not any(ch.isdigit() for ch in subject), subject)
+    check("subject picked the motif matching the story",
+          "humanoid" in subject.lower(), subject)
+    check("researched themes carried into the subject",
+          "robot training data" in subject.lower(), subject)
+    check("alt text describes the picture, not the direction to the illustrator",
+          "evoking" not in pack["image_alt_text"].lower(), pack["image_alt_text"])
+
+    # Keywords describe the body; the headline is one line written to be clicked.
+    # When they disagree, the body wins.
+    uae = build_publishing_pack(
+        "UAE revises AI data center plan after Iranian attacks, sources say",
+        slug="uae", keywords=["ai data center plan", "power capacity"],
+        entities=["UAE"], cfg=HOUSE)
+    uae_subject = uae["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+    check("research outranks the headline when choosing the motif",
+          "server cabinets" in uae_subject.lower(), uae_subject)
+
+    # Nothing to go on at all still has to produce a usable prompt.
+    bare = build_publishing_pack("Something happened somewhere", slug="bare", cfg=HOUSE)
+    bare_subject = bare["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+    check("a bare call still yields a describable scene",
+          "abstract editorial composition" in bare_subject.lower(), bare_subject)
 
 
 def test_schema_seo_fields() -> None:
@@ -839,6 +889,7 @@ if __name__ == "__main__":
     test_setup_gate()
     test_writer_tools()
     test_publishing_pack()
+    test_derived_image_concept()
     test_seo_audit()
     test_schema_seo_fields()
     test_save_page_head()
