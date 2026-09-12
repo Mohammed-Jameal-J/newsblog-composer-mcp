@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
-PROFILE_PATH = Path(__file__).resolve().parents[3] / "profile.json"
+from ..paths import profile_path
+
+# Resolved through paths.py so an installed copy stores the profile in the
+# user's data directory instead of inside site-packages, where `pip install
+# --upgrade` would delete it and re-trigger the setup questions.
+PROFILE_PATH = profile_path()
 
 
 TONES: dict[str, dict] = {

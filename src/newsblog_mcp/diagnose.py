@@ -22,6 +22,7 @@ import sys
 import time
 
 from .config import CONFIG
+from .paths import describe as describe_paths
 from .providers.search import build_providers
 from .tools.stories import find_stories
 from .tools.verify import verify_news
@@ -83,7 +84,10 @@ def main() -> None:
         args = args[1:]
     query = args[0] if args else "artificial intelligence"
 
-    _say("Capabilities:")
+    _say("Where this install keeps its files:")
+    _say(json.dumps(describe_paths(), indent=2))
+
+    _say("\nCapabilities:")
     _say(json.dumps(CONFIG.capability_report(), indent=2))
     _usage_warning(query)
 

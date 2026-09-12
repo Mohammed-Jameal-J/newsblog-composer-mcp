@@ -7,8 +7,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(_PROJECT_ROOT / ".env")
+from .paths import data_dir, default_output_dir, dotenv_path
+
+load_dotenv(dotenv_path())
 
 
 def _env(name: str, default: str = "") -> str:
@@ -58,7 +59,9 @@ class Config:
     cta_url: str = field(default_factory=lambda: _env("CTA_URL", ""))
     cta_link_text: str = field(default_factory=lambda: _env("CTA_LINK_TEXT", ""))
 
-    output_dir: Path = field(default_factory=lambda: Path(_env("OUTPUT_DIR", "./output")).expanduser())
+    output_dir: Path = field(
+        default_factory=lambda: (Path(_env("OUTPUT_DIR")).expanduser()
+                                 if _env("OUTPUT_DIR") else default_output_dir()))
     user_agent: str = field(
         default_factory=lambda: _env(
             "HTTP_USER_AGENT", "Mozilla/5.0 (compatible; NewsBlogMCP/0.1)"
@@ -73,7 +76,9 @@ class Config:
         if not self.publisher_name:
             self.publisher_name = self.site_name
         if not self.output_dir.is_absolute():
-            self.output_dir = (_PROJECT_ROOT / self.output_dir).resolve()
+            # A relative OUTPUT_DIR is relative to the data directory, not to
+            # whatever directory the MCP client happened to launch us from.
+            self.output_dir = (data_dir() / self.output_dir).resolve()
 
     @property
     def has_llm(self) -> bool:

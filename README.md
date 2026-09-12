@@ -93,6 +93,24 @@ and the command is `/path/to/newsblog-composer-mcp/.venv/bin/python`.
 
 Any other MCP client: launch `python -m newsblog_mcp.server` over stdio.
 
+### Where it keeps your files
+
+Installed from PyPI, the server writes to your user data directory, so nothing is
+lost when you upgrade:
+
+| | |
+|---|---|
+| Windows | `%LOCALAPPDATA%\newsblog-composer-mcp` |
+| macOS | `~/Library/Application Support/newsblog-composer-mcp` |
+| Linux | `~/.local/share/newsblog-composer-mcp` |
+
+That folder holds `profile.json` (the identity you set at first run), `output/`
+(every generated post) and an optional `.env`. Set `NEWSBLOG_DATA_DIR` to put
+them somewhere else. Run from a cloned checkout instead and everything stays in
+the project folder, beside the code.
+
+`python -m newsblog_mcp.diagnose` prints the exact paths for your install.
+
 ---
 
 ## Publishing and connecting
@@ -125,9 +143,9 @@ Three levels, cheapest first.
 python tests\smoke_test.py
 ```
 
-85 checks covering schema parity, the SEO audit, AI-word detection, publisher
-identity behind aggregator links, clustering, and the publishing pack. All should
-pass in about two seconds.
+159 checks covering schema parity, the SEO audit, AI-word detection, publisher
+identity behind aggregator links, clustering, the publishing pack, the derived
+image concept and the install paths. All should pass in about two seconds.
 
 **2. Network — proves search reaches you.**
 

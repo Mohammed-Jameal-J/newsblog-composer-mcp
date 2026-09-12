@@ -791,6 +791,48 @@ def test_derived_image_concept() -> None:
           "abstract editorial composition" in bare_subject.lower(), bare_subject)
 
 
+def test_install_paths() -> None:
+    """Where the server writes must not depend on where its code lives.
+
+    Computing these from __file__ works in a checkout and silently breaks once
+    the package is installed: posts land inside site-packages and the identity
+    profile is deleted by `pip install --upgrade`.
+    """
+    print("\n[paths] data locations survive being installed")
+    import os
+    from newsblog_mcp import paths
+
+    check("a checkout is recognised as a checkout",
+          paths._is_source_checkout(ROOT), str(ROOT))
+    check("a site-packages layout is not",
+          not paths._is_source_checkout(Path("/venv/Lib/site-packages")))
+    check("in a checkout, files stay beside the code",
+          paths.data_dir() == ROOT, str(paths.data_dir()))
+    check("profile and output hang off the data dir",
+          paths.profile_path().parent == paths.data_dir()
+          and paths.default_output_dir().parent == paths.data_dir())
+
+    # The override has to win in either mode, so a user can put their posts
+    # wherever they like.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "elsewhere"
+        os.environ["NEWSBLOG_DATA_DIR"] = str(target)
+        try:
+            check("NEWSBLOG_DATA_DIR overrides the default",
+                  paths.data_dir() == target, str(paths.data_dir()))
+            check("the override directory is created", target.is_dir())
+        finally:
+            os.environ.pop("NEWSBLOG_DATA_DIR", None)
+    check("removing the override restores the checkout path",
+          paths.data_dir() == ROOT, str(paths.data_dir()))
+
+    user_dir = paths.user_data_dir()
+    check("the installed-package fallback is a per-user directory",
+          paths.APP_NAME in str(user_dir)
+          and "site-packages" not in str(user_dir), str(user_dir))
+
+
 def test_schema_seo_fields() -> None:
     print("\n[build_schema] SEO fields")
     import json
@@ -890,6 +932,7 @@ if __name__ == "__main__":
     test_writer_tools()
     test_publishing_pack()
     test_derived_image_concept()
+    test_install_paths()
     test_seo_audit()
     test_schema_seo_fields()
     test_save_page_head()
