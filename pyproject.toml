@@ -1,6 +1,6 @@
 [project]
 name = "newsblog-composer-mcp"
-version = "0.3.1"
+version = "0.3.3"
 description = "MCP server that researches, verifies and audits news blog posts. The writer writes the prose."
 readme = "README.md"
 authors = [{ name = "Mohammed Jameal J" }]
@@ -46,6 +46,21 @@ newsblog-mcp = "newsblog_mcp.server:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# The sdist otherwise sweeps up whatever is sitting in the project folder -
+# mcp-publisher.exe took one release from 112 KB to 7.5 MB. List what belongs
+# in it rather than trying to name everything that does not.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/examples",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/server.json",
+  "/.env.example",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/newsblog_mcp"]

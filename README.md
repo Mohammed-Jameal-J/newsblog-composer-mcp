@@ -1,5 +1,7 @@
 # NewsBlog Composer MCP
 
+<!-- mcp-name: io.github.Mohammed-Jameal-J/newsblog-composer -->
+
 **A research and audit tool for people who write.** It finds corroborated
 stories, pulls out facts with their sources attached, mines keywords from that
 reporting, hands the writer a brief, reviews the draft they wrote, and builds the
@@ -21,6 +23,12 @@ requirement. See [No keys? Start here](#no-keys-start-here).
 ---
 
 ## Install
+
+```powershell
+pip install newsblog-composer-mcp
+```
+
+That gives you the `newsblog-mcp` command. To hack on it instead, clone it.
 
 Windows:
 
@@ -130,8 +138,16 @@ custom connector** pointing at `https://your-host/mcp`. Custom connectors need a
 Pro, Team, Enterprise or Edu plan.
 
 **Publishing to the MCP Registry** needs the package on PyPI first, then the
-`mcp-publisher` CLI with `server.json` in this repo. The `name` field must match
-your GitHub username: `io.github.<username>/newsblog-composer`.
+`mcp-publisher` CLI with `server.json` in this repo. Four things must line up or
+the publish is rejected:
+
+- `name` must match the authenticated GitHub account: `io.github.<username>/newsblog-composer`
+- `description` must be 100 characters or fewer
+- `packages[].version` must be a release that already exists on PyPI
+- the README must carry `mcp-name: <that same name>` on its own line. The
+  registry proves package ownership by reading the description PyPI serves for
+  that exact version, so the marker has to be in the release you uploaded, not
+  just in the repo. It is the HTML comment at the top of this file.
 
 ## How to test it
 

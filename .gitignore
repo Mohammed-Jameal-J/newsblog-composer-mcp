@@ -7,3 +7,6 @@ dist/
 build/
 *.egg-info/
 profile.json
+mcp-publisher.exe
+mcp-publisher
+*.tar.gz

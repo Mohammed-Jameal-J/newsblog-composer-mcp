@@ -1,23 +1,51 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Mohammed-Jameal-J/newsblog-composer",
-  "description": "Research, verify and audit news blog posts. Finds corroborated stories, extracts sourced facts, mines keywords, builds NewsArticle and FAQPage schema, and reviews a human-written draft. It does not write the prose.",
+  "title": "NewsBlog Composer",
+  "description": "Verifies news stories, mines SEO keywords, builds schema and reviews your draft. You write it.",
   "repository": {
     "url": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp",
     "source": "github"
   },
-  "version": "0.3.1",
+  "websiteUrl": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp",
+  "version": "0.3.3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "newsblog-composer-mcp",
-      "version": "0.3.1",
-      "transport": { "type": "stdio" },
+      "version": "0.3.3",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
-        { "name": "TAVILY_API_KEY", "description": "Optional. Search provider; keyless GDELT is used when absent.", "isRequired": false, "isSecret": true, "format": "string" },
-        { "name": "GPTZERO_API_KEY", "description": "Optional. Real AI-detection reading; without it no detection score is reported.", "isRequired": false, "isSecret": true, "format": "string" },
-        { "name": "CLOUDFLARE_ACCOUNT_ID", "description": "Optional. Image generation via Workers AI.", "isRequired": false, "isSecret": false, "format": "string" },
-        { "name": "CLOUDFLARE_API_TOKEN", "description": "Optional. Image generation via Workers AI.", "isRequired": false, "isSecret": true, "format": "string" }
+        {
+          "name": "TAVILY_API_KEY",
+          "description": "Optional. Search provider; keyless GDELT is used when absent.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "GPTZERO_API_KEY",
+          "description": "Optional. Real AI-detection reading; without it no detection score is reported.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CLOUDFLARE_ACCOUNT_ID",
+          "description": "Optional. Image generation via Workers AI.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "CLOUDFLARE_API_TOKEN",
+          "description": "Optional. Image generation via Workers AI.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
       ]
     }
   ]
