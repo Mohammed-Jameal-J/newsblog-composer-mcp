@@ -191,6 +191,30 @@ hand-written reference post.
 > build the full blog package. Run find_ai_words until it comes back clean, then
 > give me the publishing pack and the paste file.
 
+## Privacy
+
+The server runs on your own machine. Nothing is sent to the author of this
+package, and there is no telemetry of any kind.
+
+What leaves your machine, and only while a tool is running:
+
+- **The headline or topic you give it** goes to whichever news search provider is
+  active. With no keys configured that is GDELT and the Bing and Google News RSS
+  feeds. If you set a provider key, it goes to that provider instead.
+- **Article URLs** are fetched directly from the publishers that host them, the
+  same request your browser would make.
+- **Your draft text** goes to an AI detector only if you set `GPTZERO_API_KEY` or
+  `SAPLING_API_KEY`, and to an image generator only if you call `generate_image`.
+  Without those keys, no text leaves your machine for either purpose.
+
+What stays on your machine: the publishing identity you set at first run
+(`profile.json`), every generated post (`output/`), and any keys you configure.
+See [Where it keeps your files](#where-it-keeps-your-files) for the exact paths.
+Nothing in that folder is uploaded anywhere.
+
+Optional API keys are read from the environment or from the extension's settings
+panel. They are used only to authenticate with the provider they belong to.
+
 ## The tools
 
 | Tool | What it does | Needs a key? |

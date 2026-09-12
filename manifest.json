@@ -1,0 +1,160 @@
+{
+  "manifest_version": "0.4",
+  "name": "newsblog-composer",
+  "display_name": "NewsBlog Composer",
+  "version": "0.3.3",
+  "description": "Verifies news stories, mines SEO keywords, builds schema and reviews your draft. You write it.",
+  "long_description": "A research and audit tool for people who write. It finds corroborated stories, pulls out facts with their sources attached, mines keywords from that reporting, hands the writer a brief, reviews the draft they wrote, and builds the NewsArticle and FAQPage schema, banner prompt and publishing pack around it.\n\nIt does not write the prose, on purpose. A model writing the sentences is exactly what an AI detector catches, and the byline claims a person wrote it. The server does search, verification, extraction, keywords, structure, schema and auditing. The person writes the sentences.\n\nIt runs with zero API keys. Every credential is an upgrade, not a requirement.",
+  "author": {
+    "name": "Mohammed Jameal J",
+    "url": "https://github.com/Mohammed-Jameal-J"
+  },
+  "homepage": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp",
+  "documentation": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp#readme",
+  "support": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp/issues",
+  "privacy_policies": [
+    "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp#privacy"
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "src/newsblog_mcp/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "newsblog-mcp"
+      ],
+      "env": {
+        "TAVILY_API_KEY": "${user_config.tavily_api_key}",
+        "GPTZERO_API_KEY": "${user_config.gptzero_api_key}",
+        "CLOUDFLARE_ACCOUNT_ID": "${user_config.cloudflare_account_id}",
+        "CLOUDFLARE_API_TOKEN": "${user_config.cloudflare_api_token}"
+      }
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  },
+  "keywords": [
+    "news",
+    "journalism",
+    "seo",
+    "schema-org",
+    "writing",
+    "research"
+  ],
+  "license": "MIT",
+  "tools": [
+    {
+      "name": "capabilities",
+      "description": "Reports which providers are live and which fallbacks are in use"
+    },
+    {
+      "name": "find_stories",
+      "description": "Turns a topic into today's actual stories, ranked by corroboration and freshness"
+    },
+    {
+      "name": "verify_news",
+      "description": "Searches news providers and counts genuinely independent publishers"
+    },
+    {
+      "name": "fetch_article_facts",
+      "description": "Downloads sources and extracts facts, short attributed quotes and figures"
+    },
+    {
+      "name": "draft_brief",
+      "description": "Hands the writer structure, sourced facts, keywords and FAQ candidates. Writes no prose"
+    },
+    {
+      "name": "review_draft",
+      "description": "Reads the writer's draft and says where it is weak. Rewrites nothing"
+    },
+    {
+      "name": "humanize_text",
+      "description": "Optional rewrite instructions for the calling model"
+    },
+    {
+      "name": "find_ai_words",
+      "description": "Finds stock AI phrasing and em dashes with the sentence each sits in"
+    },
+    {
+      "name": "score_ai_text",
+      "description": "Local style score. Not an AI-detection reading unless a detector key is set"
+    },
+    {
+      "name": "seo_keywords",
+      "description": "Mines keywords from the fetched sources plus long-tail and FAQ queries"
+    },
+    {
+      "name": "seo_audit",
+      "description": "Scores the finished body against on-page rules and returns fixes"
+    },
+    {
+      "name": "build_publishing_pack",
+      "description": "Title, labels, permalink, alt text and a paste-ready image prompt"
+    },
+    {
+      "name": "build_schema",
+      "description": "Renders the HTML body plus NewsArticle and FAQPage JSON-LD, then validates them"
+    },
+    {
+      "name": "generate_image",
+      "description": "Concept banner with a trademark filter applied before the prompt leaves the machine"
+    },
+    {
+      "name": "save_and_present",
+      "description": "Writes the finished package to disk with canonical, OG and Twitter tags"
+    },
+    {
+      "name": "get_profile",
+      "description": "Shows the publishing identity this install is using"
+    },
+    {
+      "name": "set_profile",
+      "description": "Sets the byline, company, blog domain and voice"
+    },
+    {
+      "name": "reset_profile",
+      "description": "Clears the stored identity so setup runs again"
+    }
+  ],
+  "user_config": {
+    "tavily_api_key": {
+      "type": "string",
+      "title": "Tavily API key",
+      "sensitive": true,
+      "required": false,
+      "description": "Optional. Better news search. Without it the server uses keyless GDELT and news RSS."
+    },
+    "gptzero_api_key": {
+      "type": "string",
+      "title": "GPTZero API key",
+      "sensitive": true,
+      "required": false,
+      "description": "Optional. Without it no AI-detection score is reported, rather than a guessed one."
+    },
+    "cloudflare_account_id": {
+      "type": "string",
+      "title": "Cloudflare account ID",
+      "sensitive": false,
+      "required": false,
+      "description": "Optional. Banner image generation via Workers AI."
+    },
+    "cloudflare_api_token": {
+      "type": "string",
+      "title": "Cloudflare API token",
+      "sensitive": true,
+      "required": false,
+      "description": "Optional. Banner image generation via Workers AI."
+    }
+  }
+}
