@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "newsblog-composer",
   "display_name": "NewsBlog Composer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Verifies news stories, mines SEO keywords, builds schema and reviews your draft. You write it.",
   "long_description": "A research and audit tool for people who write. It finds corroborated stories, pulls out facts with their sources attached, mines keywords from that reporting, hands the writer a brief, reviews the draft they wrote, and builds the NewsArticle and FAQPage schema, banner prompt and publishing pack around it.\n\nIt does not write the prose, on purpose. A model writing the sentences is exactly what an AI detector catches, and the byline claims a person wrote it. The server does search, verification, extraction, keywords, structure, schema and auditing. The person writes the sentences.\n\nIt runs with zero API keys. Every credential is an upgrade, not a requirement.",
   "author": {

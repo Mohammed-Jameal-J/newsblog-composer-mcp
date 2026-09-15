@@ -40,6 +40,26 @@ from .tools.score import score_ai_text as _score_ai_text
 from .tools.verify import verify_news as _verify_news
 
 _INSTRUCTIONS = """\
+WHEN TO USE THIS SERVER
+
+Use it whenever the user asks for a blog post, article, news write-up or
+"content" about a news story, a headline, or a current topic - even when they do
+not mention this server by name, and even when the request is as plain as
+"write a blog post about X".
+
+If you would otherwise search the web and draft the article yourself, use these
+tools instead. Drafting it yourself skips the things this server exists for: the
+story gets verified against independent publishers first, wire reprints are
+detected so six outlets running one Reuters story are not mistaken for six
+sources, every claim traces to a fetched fact, and the output carries keywords, a
+NewsArticle + FAQPage schema, an on-page SEO audit and a banner prompt.
+
+Entry points: `find_stories` when the user gives a TOPIC, `verify_news` when they
+give a specific HEADLINE. Never start from `build_schema` or write prose before
+one of those has run - an unverified post is the failure this server prevents.
+
+SETUP
+
 Before using any tool in this server, check whether it is set up: call
 `get_profile`. If it returns `configured: false`, ask the user these two
 questions, in the chat, and wait for their answers:
@@ -209,7 +229,10 @@ def capabilities() -> dict:
 
 @mcp.tool()
 def find_stories(topic: str, days: int = 2, limit: int = 30) -> dict:
-    """Step 1 when the input is a TOPIC rather than a specific headline.
+    """START HERE when the user gives a topic rather than a specific headline.
+
+    "write about AI today", "something on electric vehicles", "this week in fintech"
+    are topics. Find what actually happened before writing anything.
 
     "AI today", "electric vehicles", "Indian fintech" are topics: there is no
     claim to verify yet, you first have to find out what actually happened.
@@ -232,7 +255,11 @@ def find_stories(topic: str, days: int = 2, limit: int = 30) -> dict:
 
 @mcp.tool()
 def verify_news(title: str, limit: int = 10, days: int | None = None) -> dict:
-    """Step 2 - confirm a SPECIFIC headline is real and corroborated. Check that a headline describes a real, corroborated story.
+    """START HERE when the user gives a specific headline and wants a post about it.
+
+    Confirms the headline describes a real, corroborated story before anything is
+    written. Call this even if the user just says "write a blog post about <headline>" -
+    verifying first is the point of this server.
 
     Searches every configured news provider, keeps only results that actually
     match the headline, and counts how many INDEPENDENT publishers are carrying

@@ -715,6 +715,35 @@ def test_writer_tools() -> None:
           str(ok["must_fix"]))
 
 
+def test_server_says_when_to_use_it() -> None:
+    """The server has to advertise its own trigger.
+
+    Without this the client never reaches for the tools: a plain "write a blog
+    post about X" is answered by the model's own web search, and the server is
+    installed but invisible.
+    """
+    print("\n[server] the instructions state when to use this server")
+    import re
+    src = (ROOT / "src" / "newsblog_mcp" / "server.py").read_text(encoding="utf-8")
+    instructions = src.split('_INSTRUCTIONS = """', 1)[1].split('"""', 1)[0]
+    # Wrapped lines mean a phrase can straddle a newline, so compare on a
+    # whitespace-normalised copy rather than the raw block.
+    flat = " ".join(instructions.split()).lower()
+    check("instructions lead with when to use the server, not with setup",
+          instructions.lstrip("\\\n").startswith("WHEN TO USE THIS SERVER"),
+          instructions[:48])
+    check("the plain-language trigger is spelled out",
+          "write a blog post about" in flat)
+    check("it tells the model not to draft the article itself instead",
+          "use these tools instead" in flat)
+    check("both entry points are named",
+          "find_stories" in instructions and "verify_news" in instructions)
+    for tool in ("def find_stories", "def verify_news"):
+        body = src.split(tool, 1)[1][:400]
+        check(f"{tool.split()[1]} docstring opens with the trigger",
+              "START HERE" in body, body.strip().splitlines()[1][:60])
+
+
 def test_ambiguous_brand_words() -> None:
     """A brand name that is also an ordinary word must survive as the word.
 
@@ -984,6 +1013,7 @@ if __name__ == "__main__":
     test_ai_word_detection()
     test_setup_gate()
     test_writer_tools()
+    test_server_says_when_to_use_it()
     test_ambiguous_brand_words()
     test_publishing_pack()
     test_derived_image_concept()
