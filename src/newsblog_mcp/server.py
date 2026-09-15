@@ -278,16 +278,21 @@ def draft_brief(headline: str, facts: list[dict] | None = None,
                 keywords: dict | None = None,
                 references: list[dict] | None = None,
                 faq_candidates: list[str] | None = None) -> dict:
-    """Step 5. Hand the writer everything they need, then get out of the way.
+    """Step 5. Get the writing order, then write the article.
 
-    Takes the verified facts and the keywords and returns a brief: the structure
-    to follow, the facts grouped by source with the numbers and quotes separated
-    out, the keywords and where to place them, FAQ candidates, and a list of the
-    things only this writer can add.
+    Takes the verified facts and the keywords and returns the plan: a 1000-1300
+    word target, exactly two sections, the facts grouped by source with numbers
+    and quotes separated out, keyword placement, FAQ questions, and the angles
+    only this author can supply.
 
-    It does not write prose, and it should not be asked to. The person writes the
-    sentences; that is the part a byline claims, and it is the part a detector
-    catches when a model does it instead.
+    ACT ON IT IMMEDIATELY. You are the writer: compose the full body in the
+    configured voice and pass it to build_schema as `article`. Do not print the
+    brief for the user and ask them to write from it - they asked for a post.
+
+    Every reported claim must trace to a fact in the output. Where the sourcing
+    is thin, reach the length with explanatory background and mark it as
+    background; never attribute an invented detail to a source. Then run
+    find_ai_words until clean and review_draft before build_schema.
     """
     blocked = _gate()
     if blocked:

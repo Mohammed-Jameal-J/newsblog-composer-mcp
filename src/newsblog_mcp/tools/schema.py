@@ -280,8 +280,21 @@ def _validate(html_body, ld_article, ld_faq, article, faq, image, refs, cfg,
     sections = article["sections"]
     if not sections:
         issues.append("no <h2> sections supplied")
-    elif not 4 <= len(sections) <= 7:
-        issues.append(f"{len(sections)} body sections; the house style calls for 4-6")
+    elif not 2 <= len(sections) <= 4:
+        issues.append(f"{len(sections)} body sections; the house style calls for 2-3")
+    else:
+        # Length is checked per section, not just in total. Six paragraphs under
+        # one heading reads as a wall however good the sentences are, and two
+        # under one heading means the heading is doing the work.
+        heavy = [s.get("heading", "?") for s in sections
+                 if len(s.get("paragraphs") or []) > 4]
+        thin = [s.get("heading", "?") for s in sections
+                if len(s.get("paragraphs") or []) < 2 and not s.get("bullets")]
+        if heavy:
+            issues.append("section(s) running over 4 paragraphs; split them: "
+                          + ", ".join(heavy[:3]))
+        if thin:
+            issues.append("section(s) under 2 paragraphs: " + ", ".join(thin[:3]))
     if len(article["intro"]) != 2:
         issues.append(f"{len(article['intro'])} intro paragraphs; the house style calls for 2")
     if not article["cta"]:

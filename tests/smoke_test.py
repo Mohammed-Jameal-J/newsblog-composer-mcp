@@ -66,17 +66,23 @@ GOOD_ARTICLE = {
     "date_published": "2026-09-02T09:15:00+00:00",
     "intro": ["The regulator opened a formal inquiry on Tuesday.",
               "It follows an eighteen-month rise in demand."],
+    # Three sections of three paragraphs: the shape the house style asks for, so
+    # the fixture exercises a post that would actually pass validation.
     "sections": [
         {"heading": "What happened",
-         "paragraphs": ["Demand rose 34 percent in eighteen months."]},
+         "paragraphs": ["Demand rose 34 percent in eighteen months.",
+                        "The regulator opened the inquiry on Tuesday morning.",
+                        "It covers every operator above a capacity threshold."]},
         {"heading": "What the regulator said",
-         "paragraphs": ["It wants eighteen months of meter data from operators."]},
+         "paragraphs": ["It wants eighteen months of meter data from operators.",
+                        "Submissions are due before the end of the quarter.",
+                        "The scope is demand, not siting or planning consent."]},
         {"heading": "How operators responded",
-         "paragraphs": ["An industry group disputed the figure."],
+         "paragraphs": ["An industry group disputed the figure.",
+                        "Two operators said they would file early.",
+                        "The inquiry reports in March 2027."],
          "bullets": ["Can you prove where inference runs?",
                      "Is the meter data auditable?"]},
-        {"heading": "What happens next",
-         "paragraphs": ["The inquiry reports in March 2027."]},
     ],
     "cta": ("If your team is weighing grid exposure in its datacentre plans, "
             "Example Media can help you model it."),
@@ -670,8 +676,16 @@ def test_writer_tools() -> None:
           len(brief["facts_with_numbers"]) == 2)
     check("the brief asks for what only the writer has",
           len(brief["what_only_you_can_add"]) >= 4)
-    check("the brief says to write the sentences yourself",
-          any("write the sentences yourself" in r.lower() for r in brief["rules"]))
+    check("the brief orders the article written now, not handed back",
+          "You are the writer" in brief["write_this_now"]
+          and "ask them to write it" in brief["write_this_now"])
+    check("the brief targets a full-length post in two or three sections",
+          "1000 to 1300" in brief["target_length"]
+          and any("TWO or THREE sections" in s for s in brief["structure"])
+          and any("TWO to FOUR" in s for s in brief["structure"]),
+          brief["target_length"])
+    check("thin sourcing is answered with background, not invention",
+          any("does not license invention" in r for r in brief["rules"]))
 
     weak = ("In this article we will look at Mecka AI. Mecka AI raised $900 million "
             "from Andreessen last week. \"We are building the largest robotics "
@@ -699,6 +713,29 @@ def test_writer_tools() -> None:
     ok = review_draft(clean, facts=facts, cfg=CONFIG)
     check("a sourced, plainly written draft passes", not ok["must_fix"],
           str(ok["must_fix"]))
+
+
+def test_ambiguous_brand_words() -> None:
+    """A brand name that is also an ordinary word must survive as the word.
+
+    The filter replaced every "arm" on sight, so "a small robotic arm" came out
+    as "a small robotic a chip designer" and went straight into an image prompt.
+    """
+    print("\n[sanitize_prompt] brand names that are also English words")
+    for text in ("a small robotic arm at rest on a workbench",
+                 "an arm reaching toward a lever",
+                 "a meta question about the rules",
+                 "an apple on a desk beside a notebook",
+                 "the aircraft on the runway"):
+        safe, removed = sanitize_prompt(text)
+        check(f"kept as an ordinary word: {text[:34]}",
+              not removed and text in safe, safe.split(". No text")[0])
+    for text, brand in (("Arm Holdings licensed the design", "arm"),
+                        ("Meta platforms announced a change", "meta"),
+                        ("Apple said the feature ships in spring", "apple")):
+        safe, removed = sanitize_prompt(text)
+        check(f"still caught as a brand: {text[:34]}",
+              brand in removed, str(removed))
 
 
 def test_publishing_pack() -> None:
@@ -733,14 +770,24 @@ def test_publishing_pack() -> None:
     check("brand name stripped from the image prompt",
           "nvidia" not in prompt.lower() and "nvidia" in pack["trademarks_removed"],
           str(pack["trademarks_removed"]))
-    check("prompt states size, style and hard constraints",
-          "1200x630" in prompt and "Style:" in prompt
-          and "no logos" in prompt and "no text" in prompt)
+    check("prompt states size and style",
+          "1200x630" in prompt and "Style:" in prompt)
+    check("the headline is printed on the banner, not banned from it",
+          "Text to render on the image" in prompt
+          and "Regulator opens inquiry" in prompt, prompt[:60])
+    check("logos and real people are still ruled out",
+          "No real company logos" in prompt and "No recognisable real people" in prompt)
+    check("brand names survive in the headline text even when the scene is cleaned",
+          "nvidia" in pack["trademarks_removed"]
+          and "a chipmaker" in pack["gemini_image_prompt"],
+          str(pack["trademarks_removed"]))
     check("alt text ends on a word boundary",
           not pack["image_alt_text"].rstrip(".").endswith(("certificat", "-")),
           pack["image_alt_text"])
-    check("a supplied concept is marked as supplied",
-          pack["image_concept_source"] == "supplied")
+    check("a supplied concept is marked as supplied and asks nothing",
+          pack["image_concept_source"] == "supplied"
+          and pack["ask_the_user_about_the_image"] is None
+          and pack["image_direction_required"] is False)
 
 
 def test_derived_image_concept() -> None:
@@ -757,11 +804,18 @@ def test_derived_image_concept() -> None:
         slug="mecka-ai-sequoia-valuation",
         keywords=["robot training data", "human motion data", "egocentric capture"],
         entities=["Mecka AI", "Sequoia Capital"], cfg=HOUSE)
-    subject = pack["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+    subject = pack["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
 
-    check("derivation is declared, not silent",
+    check("derivation is declared and the user is asked for direction",
           pack["image_concept_source"] == "derived"
-          and "derived from the researched keywords" in pack["image_concept_note"])
+          and pack["image_direction_required"] is True
+          and len(pack["ask_the_user_about_the_image"]["options"]) == 8)
+    check("the style question offers the looks a news blog actually publishes",
+          {"product_hero", "explainer_diagram", "scene_with_display",
+           "hardware_macro", "whiteboard_sketch", "newspaper_front"}
+          <= {o["value"] for o in pack["ask_the_user_about_the_image"]["options"]})
+    check("the headline is on the banner by default",
+          "Mecka AI Nears" in pack["gemini_image_prompt"])
     check("subject is not just the headline",
           "nears" not in subject.lower() and "valuation" not in subject.lower(),
           subject)
@@ -780,13 +834,13 @@ def test_derived_image_concept() -> None:
         "UAE revises AI data center plan after Iranian attacks, sources say",
         slug="uae", keywords=["ai data center plan", "power capacity"],
         entities=["UAE"], cfg=HOUSE)
-    uae_subject = uae["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+    uae_subject = uae["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
     check("research outranks the headline when choosing the motif",
           "server cabinets" in uae_subject.lower(), uae_subject)
 
     # Nothing to go on at all still has to produce a usable prompt.
     bare = build_publishing_pack("Something happened somewhere", slug="bare", cfg=HOUSE)
-    bare_subject = bare["gemini_image_prompt"].split("Subject: ")[1].split("\n")[0]
+    bare_subject = bare["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
     check("a bare call still yields a describable scene",
           "abstract editorial composition" in bare_subject.lower(), bare_subject)
 
@@ -930,6 +984,7 @@ if __name__ == "__main__":
     test_ai_word_detection()
     test_setup_gate()
     test_writer_tools()
+    test_ambiguous_brand_words()
     test_publishing_pack()
     test_derived_image_concept()
     test_install_paths()

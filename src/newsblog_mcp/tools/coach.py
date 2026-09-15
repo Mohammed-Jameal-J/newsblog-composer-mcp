@@ -60,12 +60,14 @@ def draft_brief(
 
     return {
         "headline": normalize(headline),
-        "target_length": "600 to 900 words",
+        "target_length": "1000 to 1300 words",
         "structure": [
-            "Two short intro paragraphs. First says what happened. Second says why "
-            "it matters, without editorialising.",
-            "Four to six sections with statement headings, one to three paragraphs "
-            "each.",
+            "Two intro paragraphs. First says what happened. Second says why it "
+            "matters, without editorialising.",
+            "TWO or THREE sections, each with a statement heading and TWO to FOUR "
+            "paragraphs. Four is the hard ceiling: past that the section carries "
+            "two ideas and wants splitting, and the reader sees a wall. Vary the "
+            "count between sections rather than making every one the same length.",
             "Four to eight FAQ questions, each answerable from the facts below.",
             "A closing call to action of two or three sentences.",
             "References as a numbered list of the real URLs below.",
@@ -89,14 +91,28 @@ def draft_brief(
             "A number from your own work that puts this one in proportion.",
         ],
         "rules": [
-            "Every claim traces to a fact below. If it is not there, do not write it.",
+            "Every reported claim traces to a fact below. If a fact is not there, it "
+            "is not reported - do not attribute it to anyone.",
             "Quotes stay under 15 words and keep their attribution.",
             "Anonymously sourced claims stay hedged: reportedly, according to.",
-            "Write the sentences yourself. A model writing them is what a detector "
-            "catches, and it is the part a byline actually claims.",
+            "Thin sourcing does not license invention. Reach the word count with "
+            "explanatory background - what the terms mean, how the mechanism works, "
+            "what a reader has to understand to follow the story - and mark it as "
+            "background rather than letting it read as something a source said.",
+            "No stock AI phrasing and no em dashes. find_ai_words checks both and "
+            "the house standard is zero.",
+            "Vary sentence length deliberately. Uniform rhythm is the loudest tell "
+            "in either direction, and review_draft measures it.",
         ],
-        "next_step": ("Write the draft, then run review_draft on it. It will tell you "
-                      "what is weak without rewriting anything."),
+        "write_this_now": (
+            "You are the writer. Compose the full article to the structure above, "
+            "in the configured voice, and pass it to build_schema as `article` with "
+            "`intro` (exactly two paragraphs), `sections` (exactly two) and `cta`. "
+            "Do not return this brief to the user as a worksheet and do not ask them "
+            "to write it; they asked for a post."),
+        "next_step": ("Write the body, then run find_ai_words until it is clean and "
+                      "review_draft for anything weak, then build_schema, seo_audit "
+                      "and save_and_present."),
     }
 
 

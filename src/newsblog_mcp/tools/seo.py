@@ -328,7 +328,9 @@ def seo_audit(
           h1s[0] if h1s else "no H1 and no headline supplied")
     intro = " ".join(words[:100])
     check("primary keyword in first 100 words", _contains(intro, primary), "high")
-    check("4-6 H2 sections", 4 <= len(h2s) <= 6, "medium", f"found {len(h2s)}")
+    # Two developed sections read better at 1000-1300 words than six stubs, so
+    # the floor is 2. The FAQ and References headings count toward this total.
+    check("2-8 H2 sections", 2 <= len(h2s) <= 8, "medium", f"found {len(h2s)}")
 
     hits = _phrase_count(text, primary) if primary else 0
     density = (hits * len(primary.split()) / word_count * 100) if word_count else 0.0

@@ -61,15 +61,86 @@ def _cased(word: str) -> str:
     # Already carries capitals (EU's, AWS, iPhone): leave it alone.
     return word if word[:1].isupper() else word.capitalize()
 
+# Banner styles keyed to what a news blog actually publishes. Each one says what
+# the picture IS, not just how it is rendered, because "flat vector shapes" with
+# no subject produces the same abstract blob every time.
 _STYLES = {
-    "editorial": ("modern editorial tech illustration, flat vector shapes with subtle "
-                  "gradients and soft depth, restrained palette of slate blue, teal and "
-                  "warm grey on a light background, generous negative space"),
-    "photographic": ("cinematic photographic style, shallow depth of field, natural "
-                     "directional light, muted colour grade, no people's faces in focus"),
-    "abstract": ("abstract geometric composition, layered translucent planes, isometric "
-                 "grid motifs, cool blue and graphite palette with one warm accent"),
+    "product_hero": (
+        "studio product photograph, the object lit softly on a clean surface with "
+        "a bright airy background, shallow depth of field, generous empty space on "
+        "the left for text"),
+    "explainer_diagram": (
+        "flat vector infographic, three or four labelled stages connected by "
+        "arrows across the middle, navy and soft teal on white, simple icons, the "
+        "kind of diagram that explains a process at a glance"),
+    "scene_with_display": (
+        "wide photographic street or interior scene at eye level, a large screen "
+        "or display board in the frame carrying the headline, cinematic natural "
+        "light, real depth and atmosphere"),
+    "hardware_macro": (
+        "close photographic detail of the hardware itself, hands working on it, "
+        "shallow depth of field, cool technical lighting"),
+    "whiteboard_sketch": (
+        "a whiteboard in a working office photographed slightly off-centre, the "
+        "point of the story drawn on it by hand in marker, blurred desks behind"),
+    "newspaper_front": (
+        "front page of a printed newspaper photographed flat, cream stock, heavy "
+        "serif masthead across the top, the headline set large beneath it in bold "
+        "serif, columns of small body text, a photograph boxed into the layout"),
+    "editorial_illustration": (
+        "editorial illustration in the style of a broadsheet opinion page, flat "
+        "shapes with restrained texture, two or three colours plus a neutral "
+        "ground, confident simple forms"),
+    "newsletter_header": (
+        "clean newsletter header, one large simple subject on a plain light "
+        "ground, minimal detail, flat colour, generous empty space"),
+    # Older keys, kept so existing calls still resolve.
+    "editorial": ("editorial illustration in the style of a broadsheet opinion page, "
+                  "flat shapes with restrained texture, two or three colours"),
+    "photographic": ("photojournalistic press photograph, natural directional light, "
+                     "shallow depth of field, documentary framing"),
+    "abstract": ("abstract conceptual composition, layered geometric planes and soft "
+                 "gradients, cool palette with one warm accent"),
+    "news_photo": ("photojournalistic press photograph, natural directional light, "
+                   "shallow depth of field, documentary framing"),
+    "flat_infographic": ("flat vector infographic, labelled stages connected by "
+                         "arrows, limited palette, simple icons"),
+    "conceptual_abstract": ("abstract conceptual composition, layered geometric "
+                            "planes and soft gradients"),
 }
+
+# Where the headline sits, per style. A banner with text floating over the busiest
+# part of the picture is the commonest way these come out unusable.
+_TEXT_ZONE = {
+    "product_hero": "in the left third, over the empty background beside the object",
+    "explainer_diagram": "across the lower third, below the diagram",
+    "scene_with_display": "on the display board inside the scene, as if it were "
+                          "really printed there",
+    "hardware_macro": "in the upper left, over the darker out-of-focus area",
+    "whiteboard_sketch": "written on the whiteboard in the same marker hand",
+    "newspaper_front": "as the main front-page headline beneath the masthead",
+    "editorial_illustration": "in the left third, over flat empty ground",
+    "newsletter_header": "centred beneath the subject",
+}
+
+_STYLE_CHOICES = [
+    {"value": "product_hero", "label": "Product hero",
+     "summary": "The device or object photographed on a clean bright surface, headline beside it."},
+    {"value": "explainer_diagram", "label": "Explainer diagram",
+     "summary": "Labelled stages with arrows, big title underneath. For how-it-works stories."},
+    {"value": "scene_with_display", "label": "Real scene with a display",
+     "summary": "A street or office photo with the headline on a screen inside the shot."},
+    {"value": "hardware_macro", "label": "Hardware close-up",
+     "summary": "Hands on the actual hardware, shallow focus. For chips, servers, devices."},
+    {"value": "whiteboard_sketch", "label": "Office whiteboard",
+     "summary": "The point drawn by hand on a whiteboard. For numbers, decisions, tradeoffs."},
+    {"value": "newspaper_front", "label": "Newspaper front page",
+     "summary": "Printed broadsheet layout with your masthead and the headline set large."},
+    {"value": "editorial_illustration", "label": "Editorial illustration",
+     "summary": "Drawn, flat colour, like an opinion page. When nothing concrete fits."},
+    {"value": "newsletter_header", "label": "Newsletter header",
+     "summary": "One simple subject, lots of space. Reads well small."},
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -225,7 +296,9 @@ def build_publishing_pack(
     keywords: list[str] | None = None,
     entities: list[str] | None = None,
     image_concepts: str = "",
-    image_style: str = "editorial",
+    image_style: str = "editorial_illustration",
+    banner_text: str = "",
+    banner_kicker: str = "",
     canonical_url: str = "",
     cfg: Config | None = None,
 ) -> dict:
@@ -243,20 +316,35 @@ def build_publishing_pack(
     concept_source = "supplied" if normalize(image_concepts) else "derived"
     subject_source = (normalize(image_concepts)
                       or _derive_subject(headline, keywords, entities))
+    # Only the SCENE is run through the trademark filter. The headline printed on
+    # the banner is the post's own title and has to be spelled exactly, brand
+    # names included: writing "Apple" on a banner about Apple is reporting, and
+    # mangling it is the one thing a reader will notice immediately.
     safe_subject, removed = sanitize_prompt(subject_source)
     safe_subject = safe_subject.split(". No text")[0].strip()
-    style = _STYLES.get(image_style, _STYLES["editorial"])
+    style_key = image_style if image_style in _STYLES else "editorial_illustration"
+    style = _STYLES[style_key]
+    zone = _TEXT_ZONE.get(style_key, "in the left third, over a clear area")
+
+    # The headline goes ON the banner. Every reference blog banner does this, and
+    # a generator told "no text" produces a picture the post cannot use.
+    on_image = normalize(banner_text) or headline
+    kicker = normalize(banner_kicker)
+
+    text_block = (f'Text to render on the image, spelled exactly as written:\n'
+                  f'  Headline: "{on_image}"\n')
+    if kicker:
+        text_block += f'  Smaller line beneath it: "{kicker}"\n'
+    text_block += (f"Set the headline {zone}. Keep it large, high contrast and "
+                   f"clear of the busy part of the picture. Do not add any other "
+                   f"words.")
 
     gemini_prompt = (
-        f"Create a wide banner illustration for a news article, 1200x630 pixels, "
-        f"16:9 landscape.\n\n"
-        f"Subject: {safe_subject}.\n\n"
+        f"A 1200x630 landscape banner for a blog post.\n\n"
+        f"Scene: {safe_subject}.\n\n"
         f"Style: {style}.\n\n"
-        f"Composition: single clear focal idea, uncluttered, readable as a thumbnail "
-        f"at small size, with space on one side where a headline could sit.\n\n"
-        f"Hard constraints: no text, no words, no letters or numbers anywhere in the "
-        f"image; no logos, wordmarks, brand marks or trademarked designs; no "
-        f"recognisable real people; no watermarks; no borders or frames."
+        f"{text_block}\n\n"
+        f"No real company logos or wordmarks. No recognisable real people."
     )
 
     # Alt text describes the image for someone who cannot see it, so it takes the
@@ -280,7 +368,23 @@ def build_publishing_pack(
         "gemini_image_prompt": gemini_prompt,
         "image_alt_text": alt_text,
         "trademarks_removed": removed,
+        "image_style_used": style_key,
         "image_concept_source": concept_source,
+        "image_direction_required": concept_source == "derived",
+        "ask_the_user_about_the_image": None if concept_source == "supplied" else {
+            "question": "What should the banner look like?",
+            "options": _STYLE_CHOICES,
+            "also_ask": ("If they have a picture in mind, take it in their own words "
+                         "and pass it as image_concepts. Otherwise offer the suggested "
+                         "subject below and let them change it."),
+            "suggested_subject": safe_subject,
+            "note_on_text": ("The post headline is printed on the banner by "
+                             "default. Pass banner_text to shorten it for the "
+                             "image, and banner_kicker for a smaller second line."),
+            "how_to_apply": ("Call build_publishing_pack again with image_style set to "
+                             "their choice and image_concepts describing one concrete "
+                             "scene from the facts, then hand over the new prompt."),
+        },
         "image_concept_note": (
             "Concept written by the caller."
             if concept_source == "supplied" else
@@ -289,6 +393,13 @@ def build_publishing_pack(
             "For a better one, pass image_concepts describing a concrete scene "
             "drawn from the facts - what a reader would actually see - and call "
             "this tool again."),
+        "present_in_this_order": [
+            "Title", "Permalink", "Meta description", "Tags",
+            "Banner goes to", "Blog content", "Gemini image prompt",
+        ],
+        "hand_over_note": (
+            "Give the user exactly those seven, in that order, every time. The blog "
+            "content is the rendered body from build_schema, not a summary of it."),
         "how_to_use": (
             "1. Paste gemini_image_prompt into Gemini and save the image it returns.\n"
             f"2. Upload it as {suggested_image_url} (or anywhere public) and copy the "

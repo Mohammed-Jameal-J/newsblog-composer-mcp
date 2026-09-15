@@ -11,3 +11,5 @@ mcp-publisher.exe
 mcp-publisher
 *.tar.gz
 *.mcpb
+
+Claude outputs/

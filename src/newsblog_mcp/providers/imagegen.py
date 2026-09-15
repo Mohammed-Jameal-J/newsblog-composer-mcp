@@ -44,11 +44,35 @@ class ImageProviderError(RuntimeError):
     pass
 
 
+# Brand names that are also ordinary English words. Replacing these on sight
+# turned "a small robotic arm" into "a small robotic a chip designer", so they
+# only count as brands when the word after them makes the company the subject.
+_AMBIGUOUS = {
+    "arm": re.compile(
+        r"\barm\b(?=\s+(?:holdings|ltd|plc|cpus?|chips?|cores?|architecture|"
+        r"processors?|designs?|licen\w+|neoverse|cortex|said|says|announced)\b)",
+        re.I),
+    "meta": re.compile(
+        r"\bmeta\b(?=\s+(?:platforms|inc|ai|llama|quest|reality|oculus|said|"
+        r"says|announced)\b)", re.I),
+    "apple": re.compile(
+        r"\bapple\b(?=\s+(?:inc|said|says|announced|confirmed|iphone|ipad|mac|"
+        r"watch|tv|silicon|park|store|event)\b)", re.I),
+}
+
+
 def sanitize_prompt(prompt: str) -> tuple[str, list[str]]:
     """Strip brand names and logo requests. Returns (safe_prompt, removed)."""
     removed: list[str] = []
     safe = prompt
+    for term, pattern in _AMBIGUOUS.items():
+        replacement = TRADEMARKS.get(term)
+        if replacement and pattern.search(safe):
+            removed.append(term)
+            safe = pattern.sub(replacement, safe)
     for term, replacement in TRADEMARKS.items():
+        if term in _AMBIGUOUS:
+            continue  # handled above, on a narrower pattern
         # Swallow any article in front of the brand so "the Nvidia logo" does not
         # become "the a chipmaker abstract symbol".
         pattern = re.compile(rf"\b(?:the|a|an)\s+{re.escape(term)}\b|\b{re.escape(term)}\b", re.I)
