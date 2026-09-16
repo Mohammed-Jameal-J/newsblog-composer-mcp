@@ -453,26 +453,55 @@ def build_publishing_pack(
 
 
 def render_pack_markdown(pack: dict) -> str:
+    """The pack as a file, built defensively.
+
+    Every field is read with .get(). A caller does not always hand back the dict
+    this module returned - a model often retypes the parts it thinks matter -
+    and direct indexing turned one absent key into a KeyError that took the whole
+    of save_and_present down with it. The package on disk matters more than a
+    complete publish-pack.md, so a missing field becomes a visible gap in the
+    file rather than a failed save.
+    """
+    def line(value, fallback: str = "(not set)") -> str:
+        text = "" if value is None else str(value).strip()
+        return text or fallback
+
+    description = line(pack.get("meta_description"), "")
     lines = [
         "# Publishing pack", "",
-        "## Title", "", pack["title"], "",
-        "## Search description", "", pack["meta_description"], "",
-        f"({len(pack['meta_description'])} characters)", "",
-        "## Labels / tags", "", pack["labels_line"] or "(none generated)", "",
-        "## Permalink", "",
-        f"Custom permalink: `{pack['permalink_slug']}`", "",
-        f"Full URL: {pack['full_url']}", "",
-        "## Banner image goes here", "",
-        f"`{pack.get('suggested_image_url', '')}`", "",
-        "## Image prompt for Gemini", "",
-        "Paste this into Gemini, save the image, upload it, then put the public URL "
-        "into build_schema.", "",
-        "```", pack["gemini_image_prompt"], "```", "",
-        "## Image alt text", "", pack["image_alt_text"], "",
+        "## Title", "", line(pack.get("title")), "",
+        "## Search description", "", description or "(not set)", "",
     ]
-    if pack["trademarks_removed"]:
+    if description:
+        lines += [f"({len(description)} characters)", ""]
+    lines += [
+        "## Labels / tags", "",
+        line(pack.get("labels_line") or ", ".join(pack.get("labels") or []),
+             "(none generated)"), "",
+        "## Permalink", "",
+        f"Custom permalink: `{line(pack.get('permalink_slug'))}`", "",
+        f"Full URL: {line(pack.get('full_url'))}", "",
+        "## Banner image goes here", "",
+        f"`{line(pack.get('suggested_image_url'))}`", "",
+    ]
+
+    prompt = pack.get("gemini_image_prompt")
+    lines += ["## Image prompt for Gemini", ""]
+    if prompt:
+        lines += ["Paste this into Gemini, save the image, upload it, then put the "
+                  "public URL into build_schema.", "",
+                  "```", str(prompt), "```", ""]
+    else:
+        lines += ["No prompt yet - the banner style has not been chosen. Ask the "
+                  "user which style they want, then call build_publishing_pack "
+                  "again with image_style set.", ""]
+
+    lines += ["## Image alt text", "", line(pack.get("image_alt_text")), ""]
+
+    removed = pack.get("trademarks_removed") or []
+    if removed:
         lines += ["## Brand terms stripped from the image prompt", "",
-                  ", ".join(pack["trademarks_removed"]),
+                  ", ".join(str(r) for r in removed),
                   "", "These were replaced with generic descriptors so the generated "
                   "image cannot reproduce a real trademark.", ""]
     return "\n".join(lines)

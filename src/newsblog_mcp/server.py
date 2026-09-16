@@ -12,12 +12,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 try:  # mcp >= 2.0
-    from mcp.server.mcpserver import MCPServer as _Server
+    from mcp.server.mcpserver import Context, MCPServer as _Server
 except ImportError:  # mcp 1.x, where the same class was called FastMCP
     from mcp.server.fastmcp import FastMCP as _Server
 
 from . import __version__
 from dataclasses import replace
+
+from pydantic import BaseModel, Field
 
 from .config import CONFIG, Config
 from .tools.coach import draft_brief as _draft_brief
@@ -478,13 +480,59 @@ def find_ai_words(text: str) -> dict:
     return _find_ai_words(text)
 
 
+
+class _BannerStyleChoice(BaseModel):
+    """What the client shows the user when the banner style is still unset."""
+
+    style: Literal[
+        "product_hero", "explainer_diagram", "scene_with_display",
+        "hardware_macro", "whiteboard_sketch", "newspaper_front",
+        "editorial_illustration", "newsletter_header",
+    ] = Field(description=(
+        "product_hero: the object photographed on a clean bright surface. "
+        "explainer_diagram: labelled stages with arrows, for how-it-works "
+        "stories. scene_with_display: a real street or office photo with the "
+        "headline on a screen in the shot. hardware_macro: hands on the "
+        "hardware, shallow focus. whiteboard_sketch: the point drawn by hand on "
+        "an office whiteboard. newspaper_front: printed broadsheet front page "
+        "with the headline set large. editorial_illustration: drawn, flat "
+        "colour, like an opinion page. newsletter_header: one simple subject "
+        "with lots of space, reads well small."))
+
+
+async def _ask_banner_style(ctx: Context | None) -> str:
+    """The banner style, asked of the user. Empty string if we could not ask."""
+    if ctx is None:
+        return ""
+    try:
+        supported = bool(getattr(ctx.client_capabilities, "elicitation", None))
+    except Exception:  # noqa: BLE001 - capability probing must never raise
+        supported = False
+    if not supported:
+        return ""
+    try:
+        answer = await ctx.elicit(
+            message=("What should the banner image look like? Pick the style "
+                     "that suits this story."),
+            schema=_BannerStyleChoice,
+        )
+    except Exception:  # noqa: BLE001 - a failed ask is a missing answer
+        return ""
+    if getattr(answer, "action", None) == "accept" and answer.data:
+        return answer.data.style
+    return ""
+
+
 @mcp.tool()
-def build_publishing_pack(headline: str, description: str = "", slug: str = "",
-                          keywords: list[str] | None = None,
-                          entities: list[str] | None = None,
-                          image_concepts: str = "",
-                          image_style: str = "editorial",
-                          canonical_url: str = "") -> dict:
+async def build_publishing_pack(headline: str, description: str = "",
+                                slug: str = "",
+                                keywords: list[str] | None = None,
+                                entities: list[str] | None = None,
+                                image_concepts: str = "",
+                                image_style: str = "",
+                                banner_text: str = "", banner_kicker: str = "",
+                                canonical_url: str = "",
+                                ctx: Context | None = None) -> dict:
     """Final step. Everything needed to publish, in one block.
 
     Returns the title, the Blogger labels line, the custom permalink slug, the
@@ -492,9 +540,19 @@ def build_publishing_pack(headline: str, description: str = "", slug: str = "",
     paste-ready prompt for Gemini with brand names already stripped, so the
     banner cannot reproduce a real trademark.
 
+    `image_style` MUST be the style the USER picked. Leave it empty and this
+    tool asks them directly, through the client, and waits for the answer - do
+    not fill it in yourself. The eight styles are product_hero,
+    explainer_diagram, scene_with_display, hardware_macro, whiteboard_sketch,
+    newspaper_front, editorial_illustration and newsletter_header. With no style
+    chosen there is no image prompt in the result and save_and_present refuses
+    the pack, because a banner the user was never asked about is the wrong
+    banner.
+
     `image_concepts`: describe what the banner should show in plain words (the
-    objects and ideas, not the company names). Leave it empty and the headline is
-    used. `image_style` is editorial, photographic or abstract.
+    objects and ideas, not the company names), drawn from the article you just
+    wrote. `banner_text` shortens the headline for the image; `banner_kicker`
+    adds a smaller second line.
 
     Pass the result to save_and_present as `pack` and it is written to
     publish-pack.md alongside the post.
@@ -502,9 +560,19 @@ def build_publishing_pack(headline: str, description: str = "", slug: str = "",
     blocked = _gate()
     if blocked:
         return blocked
+
+    # Ask the user directly rather than telling the model to ask. A description
+    # saying "ask first" is advice a caller can decline; an elicitation is a
+    # request the client puts in front of the person. Where the client does not
+    # support it, the pack comes back with no image prompt and save_and_present
+    # refuses it, which is the fallback that keeps the guarantee.
+    if not image_style:
+        image_style = await _ask_banner_style(ctx)
+
     return _build_publishing_pack(
         headline, description=description, slug=slug, keywords=keywords,
         entities=entities, image_concepts=image_concepts, image_style=image_style,
+        banner_text=banner_text, banner_kicker=banner_kicker,
         canonical_url=canonical_url, cfg=_cfg())
 
 

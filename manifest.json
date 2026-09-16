@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "newsblog-composer",
   "display_name": "NewsBlog Composer",
-  "version": "0.4.5",
+  "version": "0.5.1",
   "description": "Give it a headline or a topic and get back a verified, ready-to-publish blog post: full article, SEO, schema and banner prompt.",
   "long_description": "Ask for a blog post about a news story and this takes it from headline to publishable package.\n\nIt verifies the story is real and corroborated by independent publishers, downloads the sources and extracts facts with attribution, mines keywords from that reporting, then writes the full 1000-1300 word article to a house structure. Around the article it builds the title, meta description, permalink, tags, NewsArticle and FAQPage JSON-LD, an on-brand banner prompt, and the finished HTML.\n\nEvery fact in the post traces back to a source it fetched, not to a model's memory. It runs with zero API keys; every credential is an upgrade, not a requirement.",
   "author": {
@@ -104,7 +104,7 @@
     },
     {
       "name": "build_publishing_pack",
-      "description": "Title, labels, permalink, alt text and a paste-ready image prompt"
+      "description": "Title, labels, permalink, alt text, and a banner prompt in the style the user picks"
     },
     {
       "name": "build_schema",
