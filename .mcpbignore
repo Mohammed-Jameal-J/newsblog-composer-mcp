@@ -17,3 +17,5 @@ server.json
 mcp-publisher.exe
 *.tar.gz
 *.mcpb
+
+Claude outputs/
