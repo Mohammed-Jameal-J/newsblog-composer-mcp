@@ -101,6 +101,16 @@ GOOD_REFS = [{"title": "Regulator opens inquiry", "url": "https://news.example.c
 
 
 
+
+# save_and_present refuses without the audit numbers, the same way it refuses
+# without a pack. Tests that are not about that gate supply them.
+AUDIT_META = {
+    "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []},
+    "human_score": {"after": 70, "is_real_detector": False,
+                    "clean_of_ai_words": True},
+}
+
+
 @contextlib.contextmanager
 def tmp_profile(author: str = "Test Author", tone: str = "neutral"):
     """A configured profile in a throwaway directory.
@@ -1035,8 +1045,8 @@ def test_save_page_head() -> None:
     check("all package files written",
           {_P(x).name for x in saved["paths"]} == {
               "index.html", "paste-into-blogger.html", "body.html",
-              "newsarticle.jsonld", "faqpage.jsonld", "publish-pack.md",
-              "meta.json", "report.md"},
+              "newsarticle.jsonld", "faqpage.jsonld", "publishing-details.html",
+              "publish-pack.md", "meta.json", "report.md"},
           str([_P(x).name for x in saved["paths"]]))
     paste = _P(saved["paste_file"]).read_text(encoding="utf-8")
     check("paste file starts with the NewsArticle script",
@@ -1079,7 +1089,7 @@ def test_presents_the_post() -> None:
                              json_ld_article=out["json_ld_article"],
                              json_ld_faq=out["json_ld_faq"],
                              title=pack["title"], description=pack["meta_description"],
-                             meta=out["meta"], pack=pack, cfg=cfg)
+                             meta={**out["meta"], "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []}, "human_score": {"after": 70, "is_real_detector": False, "clean_of_ai_words": True}}, pack=pack, cfg=cfg)
 
     block = saved.get("SHOW_THIS_TO_THE_USER", "")
     check("the block is returned at all", bool(block))
@@ -1087,11 +1097,21 @@ def test_presents_the_post() -> None:
                   "Saved to", "Blog content", "Image prompt"):
         check(f"block carries {label!r}", label in block, block[:200])
     check("block carries the output folder", saved["folder"] in block)
-    check("block carries the real article text, not a summary",
-          GOOD_ARTICLE["sections"][0]["paragraphs"][0][:40] in block,
-          block[:300])
-    check("block carries every section heading",
-          all(s["heading"] in block for s in GOOD_ARTICLE["sections"]))
+    # The article lives in the artifact now, not in the chat block. A block
+    # carrying a 1000-word post gets compressed by the caller - the Checks table
+    # came back as one prose sentence with the SEO score dropped, and the image
+    # prompt vanished entirely. A short block gets printed; a long one gets
+    # summarised.
+    check("the article is NOT repeated in the chat block",
+          GOOD_ARTICLE["sections"][0]["paragraphs"][0][:40] not in block)
+    check("the block points at the artifact instead",
+          "artifact" in block.lower())
+    check("the article is still returned in full",
+          all(s["heading"] in saved["article_markdown"]
+              for s in GOOD_ARTICLE["sections"]))
+    check("and is in the page the artifact renders",
+          all(s["heading"] in saved["preview_html"]
+              for s in GOOD_ARTICLE["sections"]))
     check("a caller is told to print it verbatim",
           "exactly as it is" in saved["how_to_present"]
           and "summarise" in saved["how_to_present"])
@@ -1133,7 +1153,7 @@ def test_unfinished_work_is_reported() -> None:
     # that pack to hand over, so there is nothing to save.
     refused = save_and_present(slug="t", html_body=out["html_body"],
                                title="A title", description="A description",
-                               meta=out["meta"], pack=derived, cfg=cfg)
+                               meta={**out["meta"], "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []}, "human_score": {"after": 70, "is_real_detector": False, "clean_of_ai_words": True}}, pack=derived, cfg=cfg)
     check("saving an unchosen banner is refused",
           refused.get("error") == "banner_style_not_chosen", str(list(refused)[:2]))
     check("the refusal hands over the choices to show the user",
@@ -1146,7 +1166,7 @@ def test_unfinished_work_is_reported() -> None:
         keywords=["datacentre power use"], image_style="whiteboard_sketch", cfg=cfg)
     saved = save_and_present(slug="t", html_body=out["html_body"],
                              title="A title", description="A description",
-                             meta=out["meta"], pack=part, cfg=cfg)
+                             meta={**out["meta"], "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []}, "human_score": {"after": 70, "is_real_detector": False, "clean_of_ai_words": True}}, pack=part, cfg=cfg)
     warnings = " ".join(saved.get("before_the_user_publishes", []))
     check("a derived scene is still flagged before publishing",
           "never chosen by the user" in warnings, warnings[:200])
@@ -1241,7 +1261,7 @@ def test_preview_artifact() -> None:
                              json_ld_article=out["json_ld_article"],
                              json_ld_faq=out["json_ld_faq"],
                              title=pack["title"], description=pack["meta_description"],
-                             meta=out["meta"], pack=pack, cfg=cfg)
+                             meta={**out["meta"], "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []}, "human_score": {"after": 70, "is_real_detector": False, "clean_of_ai_words": True}}, pack=pack, cfg=cfg)
     html = saved.get("preview_html", "")
     check("preview_html is returned", bool(html))
     check("it is a complete standalone page",
@@ -1291,20 +1311,192 @@ def test_checks_are_visible() -> None:
     check("stock AI phrasing status is shown", "none found" in block)
     check("word count is shown", "words" in block)
 
-    # Nothing recorded: the rows must still appear, saying so.
-    bare = save_and_present(slug="t", html_body=out["html_body"], title=pack["title"],
-                            description=pack["meta_description"], pack=pack,
-                            meta=out["meta"], cfg=cfg)["SHOW_THIS_TO_THE_USER"]
-    check("an un-audited post says SEO was not run",
-          "not audited" in bare, bare[:500])
+    # No audit numbers at all is now a refusal, not a half-filled table: the SEO
+    # score and the detector reading are the two numbers the user looks at first,
+    # and a caller allowed to skip them did skip them.
+    refused = save_and_present(slug="t", html_body=out["html_body"],
+                               title=pack["title"],
+                               description=pack["meta_description"], pack=pack,
+                               meta=out["meta"], cfg=cfg)
+    check("saving without the audits is refused",
+          refused.get("error") == "audit_required", str(list(refused)[:2]))
+    check("the refusal names both tools",
+          "seo_audit" in refused["message"] and "score_ai_text" in refused["message"])
+    check("the refusal wrote nothing", "folder" not in refused)
+
+    # Audits present but sourcing not recorded: that row says so rather than
+    # disappearing, and a missing detector key still reports Not measured.
+    partial = save_and_present(slug="t", html_body=out["html_body"],
+                               title=pack["title"],
+                               description=pack["meta_description"], pack=pack,
+                               meta={**out["meta"], **AUDIT_META},
+                               cfg=cfg)["SHOW_THIS_TO_THE_USER"]
     check("unverified sourcing is called out rather than omitted",
-          "not recorded" in bare)
+          "not recorded" in partial, partial[:500])
     check("no detector key reports Not measured, never a guessed number",
-          "Not measured" in bare)
+          "Not measured" in partial)
 
     check("the caller is told to make an HTML artifact, not markdown",
           "text/html" in full["how_to_present"]
           and "not markdown" in full["how_to_present"].lower())
+
+
+
+def test_survives_a_reshaped_pack() -> None:
+    """A caller rarely hands back the exact dict a tool returned.
+
+    render_pack_markdown indexed the pack directly, so one absent key raised a
+    KeyError that took the whole of save_and_present down - losing the article,
+    the schema and every other file with it. The tool failed twice in a row in a
+    real run and the caller ended up assembling the package by hand.
+    """
+    print("\n[save_and_present] survives a hand-retyped pack")
+    import tempfile
+    from pathlib import Path as _P
+    from newsblog_mcp.tools.pack import render_pack_markdown
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS, cfg=cfg)
+
+    for name, sparse in (
+        ("only a title", {"title": "A title", "ready_for_save": True}),
+        ("no full_url", {"title": "A title", "meta_description": "x" * 130,
+                         "permalink_slug": "a-title", "labels_line": "One, Two",
+                         "gemini_image_prompt": "A banner.", "ready_for_save": True}),
+        ("prompt is None", {"title": "A title", "gemini_image_prompt": None,
+                            "ready_for_save": True}),
+        ("labels not a line", {"title": "A title", "labels": ["One", "Two"],
+                               "ready_for_save": True}),
+    ):
+        saved = save_and_present(slug="t", html_body=out["html_body"],
+                                 title="A title", meta={**out["meta"], "seo": {"score": 90, "passed": 20, "total_checks": 22, "must_fix": []}, "human_score": {"after": 70, "is_real_detector": False, "clean_of_ai_words": True}},
+                                 pack=sparse, cfg=cfg)
+        check(f"a pack with {name} still saves",
+              "error" not in saved and len(saved.get("paths", [])) >= 5,
+              str(saved.get("error") or len(saved.get("paths", []))))
+        check(f"a pack with {name} still shows the post",
+              GOOD_ARTICLE["sections"][0]["heading"] in saved["preview_html"])
+
+    check("render_pack_markdown alone never raises on a bare dict",
+          isinstance(render_pack_markdown({}), str))
+    check("a pack with no prompt says why, in the file",
+          "has not been chosen" in render_pack_markdown({"title": "x"}))
+
+    # meta retyped by hand can carry a string where a dict belongs.
+    bad_meta = save_and_present(slug="t", html_body=out["html_body"], title="A title",
+                                meta={"seo": "96/100", "verification": "ok",
+                                      "human_score": None},
+                                pack={"title": "A title", "ready_for_save": True},
+                                cfg=cfg)
+    check("a string where the audit dict belongs is caught, not crashed on",
+          bad_meta.get("error") == "audit_required", str(list(bad_meta)[:2]))
+
+    # Properly shaped audits, but junk elsewhere in meta: still must not crash.
+    bad_meta = save_and_present(slug="t", html_body=out["html_body"], title="A title",
+                                meta={**AUDIT_META, "verification": "ok",
+                                      "references": "none"},
+                                pack={"title": "A title", "ready_for_save": True},
+                                cfg=cfg)
+    check("a string where a dict belongs does not crash the save",
+          "error" not in bad_meta and "### Checks" in bad_meta["SHOW_THIS_TO_THE_USER"],
+          str(bad_meta.get("error")))
+    check("an unconfirmed banner style is stated, not omitted",
+          "not confirmed" in bad_meta["SHOW_THIS_TO_THE_USER"],
+          bad_meta["SHOW_THIS_TO_THE_USER"][:400])
+
+
+
+def test_panel_is_in_the_artifact() -> None:
+    """Whatever must not go missing goes in the file, not only the chat.
+
+    The caller compressed a Checks table into one prose sentence and dropped the
+    SEO score and the image prompt. A file cannot be paraphrased.
+    """
+    print("\n[save_and_present] publishing panel in the preview page")
+    import tempfile
+    from pathlib import Path as _P
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS, cfg=cfg)
+    pack = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"], image_concepts="a substation at dusk",
+        image_style="newspaper_front", cfg=cfg)
+    saved = save_and_present(
+        slug="t", html_body=out["html_body"], json_ld_article=out["json_ld_article"],
+        json_ld_faq=out["json_ld_faq"], title=pack["title"],
+        description=pack["meta_description"], pack=pack, cfg=cfg,
+        meta={**out["meta"],
+              "verification": {"is_legit": True,
+                               "independent_publishers": ["Reuters", "CNA"]},
+              "seo": {"score": 96, "passed": 23, "total_checks": 24, "must_fix": []},
+              "human_score": {"after": 81, "detector_used": "gptzero",
+                              "is_real_detector": True, "clean_of_ai_words": True}})
+    html = saved["preview_html"]
+    # The artifact is the post and nothing else. Publishing details in the page
+    # the user reads as the finished article are clutter in the one place that
+    # should look exactly like what gets published.
+    check("the page is the post alone", "Publishing details" not in html)
+    check("no image prompt in the page", "1200x630" not in html)
+    check("the article is still there",
+          GOOD_ARTICLE["sections"][0]["heading"] in html)
+
+    # The same details exist on disk as their own file, clearly separate.
+    details = _P(saved["folder"], "publishing-details.html").read_text(encoding="utf-8")
+    check("publishing-details.html carries the SEO score", "96/100" in details)
+    check("...the detector reading", "81/100 human" in details)
+    check("...the banner style", "newspaper_front" in details)
+    check("...the image prompt", "1200x630" in details)
+    check("...the permalink and tags",
+          pack["permalink_slug"] in details and "Datacentre Power Use" in details)
+    check("...and says not to paste it into the blog",
+          "Do not paste this section" in details)
+
+    check("the chat block still carries the image prompt",
+          "1200x630" in saved["SHOW_THIS_TO_THE_USER"])
+
+
+
+def test_server_asks_for_the_banner_style() -> None:
+    """The server asks the user itself rather than telling the model to ask.
+
+    The wrapper defaulted image_style to "editorial", which is a real key in
+    _STYLES - so style_chosen came back True even when the caller passed
+    nothing, and the gate added in 0.4.5 could never fire. The default is now
+    empty and the tool elicits the answer from the client.
+    """
+    print("\n[build_publishing_pack] the server does the asking")
+    import asyncio
+    import inspect
+    from newsblog_mcp import server as srv
+    from newsblog_mcp.tools.pack import _STYLES
+
+    sig = inspect.signature(srv.build_publishing_pack)
+    check("the wrapper no longer defaults to a real style",
+          sig.parameters["image_style"].default == "",
+          repr(sig.parameters["image_style"].default))
+    check("...which matters because the old default was a valid key",
+          "editorial" in _STYLES)
+    check("the tool is async so it can wait for the user",
+          inspect.iscoroutinefunction(srv.build_publishing_pack))
+    check("banner_text and banner_kicker reach the pack",
+          {"banner_text", "banner_kicker"} <= set(sig.parameters))
+
+    check("the choice offers all eight styles",
+          len(srv._BannerStyleChoice.model_fields["style"].annotation.__args__) == 8)
+    check("every offered style is a real one",
+          all(v in _STYLES for v in
+              srv._BannerStyleChoice.model_fields["style"].annotation.__args__))
+
+    # No context, or a client that cannot be asked: no style, so no prompt, and
+    # save_and_present refuses the pack. The guarantee survives the fallback.
+    check("no client to ask means no style",
+          asyncio.run(srv._ask_banner_style(None)) == "")
+
+    class _NoElicit:
+        client_capabilities = type("C", (), {"elicitation": None})()
+    check("a client without elicitation support means no style",
+          asyncio.run(srv._ask_banner_style(_NoElicit())) == "")
 
 
 if __name__ == "__main__":
@@ -1334,8 +1526,11 @@ if __name__ == "__main__":
     test_unfinished_work_is_reported()
     test_word_count_floor()
     test_front_door()
+    test_server_asks_for_the_banner_style()
     test_preview_artifact()
     test_checks_are_visible()
+    test_survives_a_reshaped_pack()
+    test_panel_is_in_the_artifact()
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("Failed:", ", ".join(FAILED))

@@ -46,6 +46,7 @@ _PAGE = """<!doctype html>
 </head>
 <body>
 {body}
+{panel}
 </body>
 </html>
 """
@@ -245,6 +246,36 @@ def save_and_present(
             "next_tool": "build_publishing_pack",
         }
 
+    # The audit numbers are required for the same reason the pack is: a caller
+    # that can finish without them does finish without them, and the user gets a
+    # table with the two numbers they asked for missing. Refusing is what makes
+    # seo_audit and score_ai_text actually run.
+    _m = meta if isinstance(meta, dict) else {}
+    missing_audits = [
+        name for name, key in (("seo_audit", "seo"), ("score_ai_text", "human_score"))
+        if not isinstance(_m.get(key), dict) or not _m.get(key)
+    ]
+    if pack and missing_audits:
+        return {
+            "error": "audit_required",
+            "message": (
+                f"Run {' and '.join(missing_audits)} on the finished body and pass "
+                f"the result(s) in meta, then call this again. Without them the "
+                f"user's Checks table has no SEO score and no AI-detection "
+                f"reading - the two numbers they look at first. Nothing has been "
+                f"written to disk."
+            ),
+            "meta_keys_needed": [k for n, k in
+                                 (("seo_audit", "seo"),
+                                  ("score_ai_text", "human_score"))
+                                 if n in missing_audits],
+            "example": {
+                "seo": "the whole dict seo_audit returned",
+                "human_score": ("the whole dict score_ai_text returned, including "
+                                "is_real_detector and clean_of_ai_words"),
+            },
+        }
+
     if not pack:
         return {
             "error": "pack_required",
@@ -263,6 +294,12 @@ def save_and_present(
     folder.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
 
+    pack = pack or {}
+    article_markdown = body_to_markdown(html_body)
+    checks_meta = {**(meta or {}), "_banner_style": pack.get("image_style_used")
+                   if pack.get("image_style_chosen_by_user") else None}
+    checks_rows = _checks_table(checks_meta, article_markdown)
+
     canonical = canonical_url or (meta or {}).get("canonical", "")
     social_image = image_url or (meta or {}).get("image", "")
     page = _PAGE.format(
@@ -280,6 +317,13 @@ def save_and_present(
         ld_article=json_ld_article or "{}",
         ld_faq=json_ld_faq or "{}",
         body=html_body,
+        # Nothing but the post. The publishing details and the image prompt were
+        # briefly rendered here as insurance against a caller compressing the
+        # chat block - but the artifact is what the user reads as the article,
+        # and a "Publishing details" section at the bottom of it is clutter in
+        # the one place that should look exactly like the finished page. Those
+        # details live in the chat block, in publish-pack.md and in report.md.
+        panel="",
     )
     # The block to paste straight into Blogger: both JSON-LD scripts followed by
     # the styled body, exactly as the house format expects it.
@@ -312,11 +356,32 @@ def save_and_present(
         else:
             written.append(f"MISSING image_path: {image_path}")
 
+    # Same details as a standalone page on disk, for anyone who wants them in a
+    # browser rather than in the chat. Deliberately a separate file so it can
+    # never be mistaken for the post.
+    if pack:
+        try:
+            details = folder / "publishing-details.html"
+            details.write_text(
+                "<!doctype html><meta charset=\"utf-8\">"
+                + _panel_html(pack, meta or {}, folder, checks_rows),
+                encoding="utf-8")
+            written.append(str(details))
+        except Exception as exc:  # noqa: BLE001
+            written.append(f"publishing-details.html SKIPPED: {exc}")
+
     if pack:
         from .pack import render_pack_markdown
         pack_path = folder / "publish-pack.md"
-        pack_path.write_text(render_pack_markdown(pack), encoding="utf-8")
-        written.append(str(pack_path))
+        try:
+            pack_path.write_text(render_pack_markdown(pack), encoding="utf-8")
+            written.append(str(pack_path))
+        except Exception as exc:  # noqa: BLE001 - see below
+            # A caller handing back a reshaped pack used to raise here and take
+            # the whole tool down, losing the article, the schema and every
+            # other file with it. The post is what matters; say what went wrong
+            # and keep the package.
+            written.append(f"publish-pack.md SKIPPED: {type(exc).__name__}: {exc}")
 
     if meta:
         path = folder / "meta.json"
@@ -328,16 +393,13 @@ def save_and_present(
         report_path.write_text(report, encoding="utf-8")
         written.append(str(report_path))
 
-    pack = pack or {}
-    article_markdown = body_to_markdown(html_body)
     display = _display_block(
         folder=folder,
         article_markdown=article_markdown,
         title=title or pack.get("title") or slug,
         description=description or pack.get("meta_description", ""),
         pack=pack,
-        meta={**(meta or {}), "_banner_style": pack.get("image_style_used")
-              if pack.get("image_style_chosen_by_user") else None},
+        meta=checks_meta,
     )
 
     result = {
@@ -352,7 +414,11 @@ def save_and_present(
             "disk. An HTML artifact gives both views behind one toggle - the "
             "laid-out post for the writer, the markup and JSON-LD for the "
             "developer - and it is the same bytes as index.html.\n\n"
-            "2. Print SHOW_THIS_TO_THE_USER in your reply exactly as it is. It "
+            "2. Print SHOW_THIS_TO_THE_USER in your reply exactly as it is, "
+            "including the Checks table as a TABLE and the image prompt in its "
+            "code block. It is deliberately short - the article is in the "
+            "artifact, not in here - so there is nothing to condense. Do not "
+            "turn the table into a sentence and do not drop the image prompt. It "
             "carries the title, permalink, meta description, tags, banner URL, "
             "where the files were saved, the article and the image prompt, in the "
             "order the user wants them. Do not summarise it, do not drop lines "
@@ -393,12 +459,17 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
     number is shown as missing rather than omitted - a blank row is a prompt to
     go and run the step; a row that simply is not there reads as "fine".
     """
-    verification = meta.get("verification") or {}
-    seo = meta.get("seo") or {}
-    scores = meta.get("human_score") or {}
+    def as_dict(value) -> dict:
+        """A caller that retypes `meta` by hand can put a string here."""
+        return value if isinstance(value, dict) else {}
+
+    verification = as_dict(meta.get("verification"))
+    seo = as_dict(meta.get("seo"))
+    scores = as_dict(meta.get("human_score"))
     words = len(article_markdown.split())
 
-    publishers = verification.get("independent_publishers") or []
+    publishers = [str(x) for x in (verification.get("independent_publishers") or [])
+                  if str(x).strip()]
     if verification:
         verdict = ("corroborated" if verification.get("is_legit") else "NOT corroborated")
         sources = (f"**{verdict}** - {len(publishers)} independent "
@@ -409,6 +480,7 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
 
     if seo:
         must = seo.get("must_fix") or []
+        must = must if isinstance(must, list) else []
         seo_line = (f"**{seo.get('score', '?')}/100** "
                     f"({seo.get('passed', '?')}/{seo.get('total_checks', '?')} checks"
                     + (f", {len(must)} must-fix" if must else ", nothing must-fix") + ")")
@@ -443,13 +515,81 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
     return [
         "| | |", "|---|---|",
         f"| Sources | {sources} |",
-        *([f"| Banner style | **{banner_style}**, chosen by you |"]
-          if banner_style else []),
+        f"| Banner style | **{banner_style}**, chosen by you |" if banner_style
+        else "| Banner style | _not confirmed - ask which style they want_ |",
         f"| Length | {length} |",
         f"| SEO | {seo_line} |",
         f"| Stock AI phrasing | {stock} |",
         f"| AI detection | {human} |",
     ]
+
+
+
+def _panel_html(pack: dict, meta: dict, folder: Path, checks: list[str]) -> str:
+    """The publishing details, rendered into the preview page itself.
+
+    The chat block is text a model can compress, and it did: a Checks table came
+    back as one prose sentence with the SEO score dropped, and the image prompt
+    vanished. The artifact is a file - whatever is in it is what the user sees.
+    So everything that must not go missing goes in here as well.
+    """
+    def esc(value) -> str:
+        return _attr("" if value is None else str(value))
+
+    rows = []
+    for raw in checks:
+        cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+        if len(cells) != 2 or set("".join(cells)) <= set("-"):
+            continue
+        label, value = cells
+        # Strip markdown emphasis without touching underscores inside
+        # identifiers - a blanket replace turned newspaper_front into
+        # newspaperfront, which is not a style anyone can pass back.
+        value = value.replace("**", "").strip()
+        if value.startswith("_") and value.endswith("_"):
+            value = value[1:-1]
+        value = value.replace("`", "")
+        rows.append(
+            f'<tr><td style="padding:6px 14px 6px 0;color:#666;'
+            f'white-space:nowrap;vertical-align:top">{esc(label)}</td>'
+            f'<td style="padding:6px 0">{esc(value)}</td></tr>')
+
+    prompt = pack.get("gemini_image_prompt")
+    prompt_block = (
+        f'<pre style="white-space:pre-wrap;background:#f6f6f6;padding:14px;'
+        f'border-radius:6px;font-size:13px;line-height:1.6;overflow-x:auto">'
+        f'{esc(prompt)}</pre>'
+        if prompt else
+        '<p style="font-size:14px;color:#666">Not generated - the banner style '
+        'was never chosen.</p>')
+
+    fields = [
+        ("Permalink", pack.get("permalink_slug") or meta.get("slug", "")),
+        ("Full URL", pack.get("full_url") or meta.get("canonical", "")),
+        ("Meta description", pack.get("meta_description", "")),
+        ("Tags", pack.get("labels_line")
+         or ", ".join(pack.get("labels") or []) or "(none)"),
+        ("Banner goes to", pack.get("suggested_image_url") or meta.get("image", "")),
+        ("Saved to", str(folder)),
+    ]
+    field_rows = "".join(
+        f'<tr><td style="padding:6px 14px 6px 0;color:#666;white-space:nowrap;'
+        f'vertical-align:top">{esc(label)}</td>'
+        f'<td style="padding:6px 0;word-break:break-word">{esc(value)}</td></tr>'
+        for label, value in fields if str(value or "").strip())
+
+    return f"""
+<div style="max-width:720px;margin:48px auto 0;padding:24px 0 8px;
+  border-top:3px solid #1a1a1a;font-family:Arial,Helvetica,sans-serif;
+  color:#1a1a1a">
+<h2 style="font-size:18px;margin:0 0 4px">Publishing details</h2>
+<p style="font-size:13px;color:#777;margin:0 0 18px">Not part of the post. Do not paste this section into your blog.</p>
+<table style="border-collapse:collapse;font-size:14px;width:100%">{field_rows}</table>
+<h3 style="font-size:16px;margin:26px 0 8px">Checks</h3>
+<table style="border-collapse:collapse;font-size:14px;width:100%">{"".join(rows)}</table>
+<h3 style="font-size:16px;margin:26px 0 8px">Image prompt</h3>
+{prompt_block}
+</div>"""
 
 
 def _display_block(folder: Path, article_markdown: str, title: str,
@@ -480,12 +620,19 @@ def _display_block(folder: Path, article_markdown: str, title: str,
         "",
         "---", "",
         "### Blog content", "",
-        article_markdown or "_(no body was passed to save_and_present)_",
+        "The full post is in the artifact above - readable, with the code view "
+        "for the markup and JSON-LD." if article_markdown
+        else "_(no body was passed to save_and_present)_",
         "", "---", "",
     ]
     if prompt:
         lines += ["### Image prompt", "",
+                  "Paste this into Gemini, then upload the result to the banner "
+                  "URL above.", "",
                   "```", prompt, "```", ""]
+    else:
+        lines += ["### Image prompt", "",
+                  "_Not generated - the banner style was never chosen._", ""]
     return "\n".join(lines)
 
 
@@ -513,21 +660,27 @@ def _unfinished(pack: dict, meta: dict, word_count: int) -> list[str]:
         out.append(
             f"The body is {word_count} words. The house target is 1000-1300, so "
             f"this is short - say so rather than presenting it as finished.")
-    seo = meta.get("seo") or {}
-    for issue in seo.get("must_fix", []):
-        out.append(f"SEO must-fix: {issue.get('check')} - {issue.get('detail', '')}")
+    seo = meta.get("seo")
+    seo = seo if isinstance(seo, dict) else {}
+    must = seo.get("must_fix")
+    for issue in (must if isinstance(must, list) else []):
+        if isinstance(issue, dict):
+            out.append(f"SEO must-fix: {issue.get('check')} - {issue.get('detail', '')}")
     return out
 
 
 def _report(title: str, meta: dict) -> str:
     """A one-page summary of how the post was produced, for the person who has
     to decide whether to publish it."""
+    def as_dict(value) -> dict:
+        return value if isinstance(value, dict) else {}
+
     lines = [f"# {title}", ""]
     if meta.get("author") or meta.get("tone_label"):
         lines += [f"By **{meta.get('author', '')}** · voice: "
                   f"**{meta.get('tone_label', meta.get('tone', 'unset'))}**", ""]
 
-    verification = meta.get("verification") or {}
+    verification = as_dict(meta.get("verification"))
     if verification:
         lines += [
             "## Verification", "",
@@ -537,7 +690,7 @@ def _report(title: str, meta: dict) -> str:
             f"- Reasoning: {verification.get('reasoning', '')}", "",
         ]
 
-    scores = meta.get("human_score") or {}
+    scores = as_dict(meta.get("human_score"))
     if scores:
         real = scores.get("is_real_detector")
         lines += ["## AI detection", ""]
@@ -569,7 +722,7 @@ def _report(title: str, meta: dict) -> str:
         lines += ["", "> No detector score proves who wrote a text, in either "
                       "direction. Treat any number here as directional.", ""]
 
-    seo = meta.get("seo") or {}
+    seo = as_dict(meta.get("seo"))
     if seo:
         lines += [
             "## SEO", "",
@@ -578,7 +731,8 @@ def _report(title: str, meta: dict) -> str:
             f"- Primary keyword: {seo.get('primary_keyword', '')}",
             f"- Secondary: {', '.join(seo.get('secondary_keywords', []))}",
         ]
-        for issue in seo.get("must_fix", []):
+        for issue in (seo.get("must_fix") if isinstance(seo.get("must_fix"), list)
+                      else []):
             lines.append(f"- MUST FIX: {issue.get('check')}: {issue.get('detail', '')}")
         lines.append("")
 
@@ -589,6 +743,8 @@ def _report(title: str, meta: dict) -> str:
               f"- Image: {meta.get('image', '')}", ""]
 
     references = meta.get("references") or []
+    references = [r for r in references if isinstance(r, dict)] \
+        if isinstance(references, list) else []
     if references:
         lines += ["## References", ""]
         lines += [f"{n}. [{r.get('title', r.get('url'))}]({r.get('url')})"

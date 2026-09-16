@@ -162,7 +162,7 @@ Three levels, cheapest first.
 python tests\smoke_test.py
 ```
 
-237 checks covering schema parity, the SEO audit, AI-word detection, publisher
+272 checks covering schema parity, the SEO audit, AI-word detection, publisher
 identity behind aggregator links, clustering, the publishing pack, the derived
 image concept, the trademark filter and the install paths. All should pass in
 about two seconds.
