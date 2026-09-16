@@ -2,20 +2,23 @@
 
 <!-- mcp-name: io.github.Mohammed-Jameal-J/newsblog-composer -->
 
-**A research and audit tool for people who write.** It finds corroborated
-stories, pulls out facts with their sources attached, mines keywords from that
-reporting, hands the writer a brief, reviews the draft they wrote, and builds the
-schema, banner prompt and publishing pack around it.
+**Headline in, publishable post out.** Give it a news headline or a topic and it
+verifies the story is real, downloads the sources, extracts the facts with
+attribution, mines the keywords, writes the article, and builds the SEO, schema,
+banner prompt and publishing pack around it.
 
-**It does not write the prose, on purpose.** A model writing the sentences is
-exactly what an AI detector catches, and no amount of cliché-removal changes
-that: detectors measure how predictable the wording is, not how many stock
-phrases it contains. More to the point, the byline claims a person wrote it.
+**Every fact traces to a source it fetched**, not to a model's memory. The server
+refuses to draft anything until at least two independent publishers carry the
+story, or a single primary source does. Facts, figures and quotes come out of
+articles it actually downloaded, and `build_schema` rejects reference URLs that
+are aggregator redirects rather than real publisher links.
 
-So the split is: the server does search, verification, extraction, keywords,
-structure, schema and auditing. The person writes the sentences. `draft_brief`
-gives them everything to start with; `review_draft` tells them where the draft is
-weak without rewriting a word.
+**The prose is machine-written and the tool says so.** `find_ai_words` and
+`score_ai_text` report local style signals; without a detector API key
+`score_ai_text` returns `Not measured` rather than inventing a number. If the
+byline is going to claim a person wrote it, that is the writer's call to make
+with their eyes open — `review_draft` exists so the draft gets edited rather than
+published raw.
 
 **It runs with zero API keys.** Every credential is an upgrade, not a
 requirement. See [No keys? Start here](#no-keys-start-here).
@@ -159,9 +162,10 @@ Three levels, cheapest first.
 python tests\smoke_test.py
 ```
 
-159 checks covering schema parity, the SEO audit, AI-word detection, publisher
+237 checks covering schema parity, the SEO audit, AI-word detection, publisher
 identity behind aggregator links, clustering, the publishing pack, the derived
-image concept and the install paths. All should pass in about two seconds.
+image concept, the trademark filter and the install paths. All should pass in
+about two seconds.
 
 **2. Network — proves search reaches you.**
 
@@ -185,11 +189,37 @@ before writing the output folder. Use it as the reference for what a good run
 looks like. `examples\build_mistral_example.py` does the same for the
 hand-written reference post.
 
-**4. In Claude Desktop**, after restarting it:
+**4. In Claude Desktop**, after restarting it. Say it the way you normally
+would — you should not have to name the tools:
 
-> Use find_stories to get today's AI stories, pick the best corroborated one, and
-> build the full blog package. Run find_ai_words until it comes back clean, then
-> give me the publishing pack and the paste file.
+> Write me a blog post about "<a real headline from today>"
+
+The server should answer by calling `write_blog_post`, then `verify_news`, and
+work through to the finished package, ending with the post rendered in an
+artifact and the publishing details printed in the chat.
+
+**If the client searches the web and writes its own markdown file instead**, the
+extension did not trigger. Two things to check, in order:
+
+1. Settings → Extensions shows it enabled. Note that closing the window on
+   Windows only minimises to the tray — toggle the extension off and on to
+   respawn the server.
+2. **Tell the client to prefer it.** A host's own system prompt tends to treat
+   "write me a blog post" as "search the web and make an artifact", and an MCP
+   server's `instructions` cannot reliably outrank that. The fix is client-side:
+   put a line like this in a Claude project's instructions, or in your global
+   preferences, and work inside it —
+
+   > When I ask for a blog post, an article, or a news write-up, always use the
+   > NewsBlog Composer tools. Start with `write_blog_post`. Never search the web
+   > and draft the article yourself.
+
+   This is normal for local MCP servers; naming the server in the request works
+   just as well for one-offs.
+
+Extensions are **desktop only**. On the phone or the web app there is no
+extension to call, and the client will answer from web search without saying
+so.
 
 ## Privacy
 
@@ -220,14 +250,15 @@ panel. They are used only to authenticate with the provider they belong to.
 | Tool | What it does | Needs a key? |
 |---|---|---|
 | `capabilities` | Reports which providers are live and which fallbacks are in use | no |
+| `write_blog_post` | The front door. Call it whenever someone asks for a blog post; returns the ordered plan | no |
 | `find_stories` | Turns a topic into today's actual stories, grouped and ranked by corroboration and freshness | no |
 | `verify_news` | Searches news providers, keeps matching results, counts independent publishers | no (keyless RSS) |
 | `fetch_article_facts` | Downloads sources, extracts facts, short attributed quotes and figures | never |
-| `draft_brief` | Hands the writer the structure, sourced facts, keywords and FAQ candidates | never |
-| `review_draft` | Reads the writer's draft and says where it is weak. Rewrites nothing | never |
+| `draft_brief` | Returns the writing order: structure, sourced facts, keywords and FAQ candidates | never |
+| `review_draft` | Reads the finished draft and says where it is weak, before publishing | never |
 | `humanize_text` | Optional rewrite pass. Prefer `review_draft` | optional |
 | `find_ai_words` | Finds every stock AI phrase with the sentence it sits in | never |
-| `score_ai_text` | 0–100 human-readability score | optional |
+| `score_ai_text` | Local style score. `Not measured` unless a detector key is set | optional |
 | `generate_image` | Concept banner, trademark filter applied first | no (watermarked) |
 | `seo_keywords` | Mines keywords from the fetched sources; long-tail and FAQ queries from Google autocomplete | no |
 | `seo_audit` | Scores the finished body against on-page rules, returns fixes | never |

@@ -296,7 +296,12 @@ def build_publishing_pack(
     keywords: list[str] | None = None,
     entities: list[str] | None = None,
     image_concepts: str = "",
-    image_style: str = "editorial_illustration",
+    # Deliberately empty rather than a real default. A default style is a style
+    # the user never chose, and it silently suppressed the question: a caller
+    # that wrote the article and described a scene from it satisfied
+    # image_concepts, so the pack looked complete and the banner came out in
+    # whatever style happened to be the default.
+    image_style: str = "",
     banner_text: str = "",
     banner_kicker: str = "",
     canonical_url: str = "",
@@ -322,8 +327,13 @@ def build_publishing_pack(
     # mangling it is the one thing a reader will notice immediately.
     safe_subject, removed = sanitize_prompt(subject_source)
     safe_subject = safe_subject.split(". No text")[0].strip()
-    style_key = image_style if image_style in _STYLES else "editorial_illustration"
+    # Style and scene are separate decisions and each can be missing on its own.
+    style_chosen = image_style in _STYLES
+    style_key = image_style if style_chosen else "editorial_illustration"
     style = _STYLES[style_key]
+    needs = [what for what, missing in (("style", not style_chosen),
+                                        ("scene", concept_source != "supplied"))
+             if missing]
     zone = _TEXT_ZONE.get(style_key, "in the left third, over a clear area")
 
     # The headline goes ON the banner. Every reference blog banner does this, and
@@ -357,7 +367,31 @@ def build_publishing_pack(
 
     suggested_image_url = f"{cfg.site_base_url.rstrip('/')}/images/{slug}-banner.jpg"
 
-    return {
+    # Ordered deliberately: when the banner still needs a decision, that decision
+    # is the first thing in the dict. Buried at position twelve it was read as
+    # optional detail and skipped every time, and the user got a generic banner
+    # they were never asked about.
+    # Hard gate. Without a style the pack carries NO image prompt at all and is
+    # marked not ready, and save_and_present refuses it. Returning a prompt built
+    # from the placeholder default let a caller pick the style itself and hand it
+    # over as if the user had chosen - which is exactly what kept happening, and
+    # no wording in a description stopped it. There is nothing here to hand over
+    # until the question has been answered.
+    result: dict = {}
+    if needs:
+        asking = " and ".join(needs)
+        result["ASK_THE_USER_FIRST"] = (
+            f"STOP and ask the user about the banner {asking} before you finish. "
+            f"{'Show them the eight styles in ask_the_user_about_the_image and let them pick one. ' if 'style' in needs else ''}"
+            f"{'Ask what the picture should show, and offer suggested_subject as a starting point. ' if 'scene' in needs else ''}"
+            f"Wait for their answer, then call this tool again with "
+            f"image_style{' and image_concepts' if 'scene' in needs else ''} set. "
+            f"A style you picked yourself is not a style the user chose - "
+            f"editorial_illustration is only a placeholder so the prompt is not "
+            f"empty, and handing it over unasked is the bug this exists to stop."
+        )
+
+    result.update({
         "title": headline,
         "meta_description": normalize(description),
         "permalink_slug": slug,
@@ -365,13 +399,16 @@ def build_publishing_pack(
         "full_url": canonical_url or f"{cfg.site_base_url.rstrip('/')}/{slug}",
         "labels": labels,
         "labels_line": ", ".join(labels),
-        "gemini_image_prompt": gemini_prompt,
+        "ready_for_save": style_chosen,
+        "gemini_image_prompt": gemini_prompt if style_chosen else None,
         "image_alt_text": alt_text,
         "trademarks_removed": removed,
         "image_style_used": style_key,
+        "image_style_chosen_by_user": style_chosen,
         "image_concept_source": concept_source,
-        "image_direction_required": concept_source == "derived",
-        "ask_the_user_about_the_image": None if concept_source == "supplied" else {
+        "image_direction_required": bool(needs),
+        "image_still_needs": needs,
+        "ask_the_user_about_the_image": None if not needs else {
             "question": "What should the banner look like?",
             "options": _STYLE_CHOICES,
             "also_ask": ("If they have a picture in mind, take it in their own words "
@@ -399,7 +436,9 @@ def build_publishing_pack(
         ],
         "hand_over_note": (
             "Give the user exactly those seven, in that order, every time. The blog "
-            "content is the rendered body from build_schema, not a summary of it."),
+            "content is the rendered body from build_schema, not a summary of it. "
+            "save_and_present composes all seven for you as SHOW_THIS_TO_THE_USER - "
+            "print that rather than assembling them by hand."),
         "how_to_use": (
             "1. Paste gemini_image_prompt into Gemini and save the image it returns.\n"
             f"2. Upload it as {suggested_image_url} (or anywhere public) and copy the "
@@ -409,7 +448,8 @@ def build_publishing_pack(
             "`labels_line` in Labels, and `permalink_slug` in Permalink > Custom.\n"
             "5. Put meta_description in Search Description."
         ),
-    }
+    })
+    return result
 
 
 def render_pack_markdown(pack: dict) -> str:

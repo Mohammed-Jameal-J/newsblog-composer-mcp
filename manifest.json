@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "newsblog-composer",
   "display_name": "NewsBlog Composer",
-  "version": "0.4.1",
-  "description": "Verifies news stories, mines SEO keywords, builds schema and reviews your draft. You write it.",
-  "long_description": "A research and audit tool for people who write. It finds corroborated stories, pulls out facts with their sources attached, mines keywords from that reporting, hands the writer a brief, reviews the draft they wrote, and builds the NewsArticle and FAQPage schema, banner prompt and publishing pack around it.\n\nIt does not write the prose, on purpose. A model writing the sentences is exactly what an AI detector catches, and the byline claims a person wrote it. The server does search, verification, extraction, keywords, structure, schema and auditing. The person writes the sentences.\n\nIt runs with zero API keys. Every credential is an upgrade, not a requirement.",
+  "version": "0.4.5",
+  "description": "Give it a headline or a topic and get back a verified, ready-to-publish blog post: full article, SEO, schema and banner prompt.",
+  "long_description": "Ask for a blog post about a news story and this takes it from headline to publishable package.\n\nIt verifies the story is real and corroborated by independent publishers, downloads the sources and extracts facts with attribution, mines keywords from that reporting, then writes the full 1000-1300 word article to a house structure. Around the article it builds the title, meta description, permalink, tags, NewsArticle and FAQPage JSON-LD, an on-brand banner prompt, and the finished HTML.\n\nEvery fact in the post traces back to a source it fetched, not to a model's memory. It runs with zero API keys; every credential is an upgrade, not a requirement.",
   "author": {
     "name": "Mohammed Jameal J",
     "url": "https://github.com/Mohammed-Jameal-J"
@@ -59,12 +59,16 @@
       "description": "Reports which providers are live and which fallbacks are in use"
     },
     {
+      "name": "write_blog_post",
+      "description": "START HERE. Use whenever the user asks for a blog post, article or news write-up about a headline or topic"
+    },
+    {
       "name": "find_stories",
       "description": "Turns a topic into today's actual stories, ranked by corroboration and freshness"
     },
     {
       "name": "verify_news",
-      "description": "Searches news providers and counts genuinely independent publishers"
+      "description": "START HERE for a specific headline. Confirms it is real and counts genuinely independent publishers"
     },
     {
       "name": "fetch_article_facts",
@@ -72,11 +76,11 @@
     },
     {
       "name": "draft_brief",
-      "description": "Hands the writer structure, sourced facts, keywords and FAQ candidates. Writes no prose"
+      "description": "Returns the writing order: structure, sourced facts, keywords and FAQ candidates to compose the article from"
     },
     {
       "name": "review_draft",
-      "description": "Reads the writer's draft and says where it is weak. Rewrites nothing"
+      "description": "Reads the finished draft and says where it is weak, so it can be revised before publishing"
     },
     {
       "name": "humanize_text",
@@ -104,7 +108,7 @@
     },
     {
       "name": "build_schema",
-      "description": "Renders the HTML body plus NewsArticle and FAQPage JSON-LD, then validates them"
+      "description": "Takes the written article and renders the HTML body plus NewsArticle and FAQPage JSON-LD, then validates them"
     },
     {
       "name": "generate_image",
