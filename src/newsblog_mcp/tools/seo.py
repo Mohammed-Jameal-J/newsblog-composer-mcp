@@ -344,7 +344,13 @@ def seo_audit(
           any(any(_contains(h, k) for k in secondary_keywords) for h in h2s),
           "low")
 
-    check("word count at least 600", word_count >= 600, "medium", str(word_count))
+    # The house target is 1000-1300 words. A 600-word floor at medium severity let
+    # a 719-word post score 93/100, which is how a draft 280 words short of the
+    # brief reached the user looking finished.
+    check("word count at least 1000", word_count >= 1000, "high",
+          f"{word_count} words; the house target is 1000-1300")
+    check("word count not over 1300", word_count <= 1300, "low",
+          f"{word_count} words")
 
     check("meta title 30-60 characters", 30 <= len(meta_title) <= 60, "high",
           f"{len(meta_title)} chars")

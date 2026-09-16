@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import contextlib
 import sys
 import threading
 from functools import partial
@@ -97,6 +98,26 @@ GOOD_FAQ = [
 GOOD_IMAGE = {"url": "https://cdn.example.com/banner.png", "alt": "Power lines at dusk"}
 GOOD_REFS = [{"title": "Regulator opens inquiry", "url": "https://news.example.com/inquiry",
               "publisher": "Example News"}]
+
+
+
+@contextlib.contextmanager
+def tmp_profile(author: str = "Test Author", tone: str = "neutral"):
+    """A configured profile in a throwaway directory.
+
+    The setup gate blocks every pipeline tool, so anything testing behaviour
+    past the gate needs one, and it must not touch the developer's real
+    profile.json.
+    """
+    import tempfile
+    from pathlib import Path as _P
+    original = profile_mod.PROFILE_PATH
+    profile_mod.PROFILE_PATH = _P(tempfile.mkdtemp()) / "profile.json"
+    try:
+        profile_mod.save_profile(author, tone, "Example Media", "example.com")
+        yield profile_mod.load_profile()
+    finally:
+        profile_mod.PROFILE_PATH = original
 
 
 def test_schema_valid() -> None:
@@ -777,6 +798,7 @@ def test_publishing_pack() -> None:
         entities=["Norwich", "EU's AI"],
         image_concepts="power lines running to a row of server racks at dusk, "
                        "seen from an Nvidia data centre",
+        image_style="hardware_macro",
         canonical_url="https://blog.example.com/2026/09/x.html", cfg=HOUSE)
     check("title carried through", pack["title"].startswith("Regulator opens"))
     check("labels are short and title-cased",
@@ -813,10 +835,29 @@ def test_publishing_pack() -> None:
     check("alt text ends on a word boundary",
           not pack["image_alt_text"].rstrip(".").endswith(("certificat", "-")),
           pack["image_alt_text"])
-    check("a supplied concept is marked as supplied and asks nothing",
+    check("a supplied concept AND a chosen style asks nothing",
           pack["image_concept_source"] == "supplied"
+          and pack["image_style_chosen_by_user"] is True
           and pack["ask_the_user_about_the_image"] is None
-          and pack["image_direction_required"] is False)
+          and pack["image_direction_required"] is False
+          and pack["image_still_needs"] == [],
+          str(pack["image_still_needs"]))
+    # The hole this closed: a caller that wrote the article and described a scene
+    # from it satisfied image_concepts, so the pack looked finished while the
+    # style was still whatever the default happened to be.
+    no_style = build_publishing_pack(
+        headline="Regulator opens inquiry into datacentre power use",
+        description="x" * 130, keywords=["datacentre power"],
+        image_concepts="a substation beside a row of server halls at dusk",
+        cfg=HOUSE)
+    check("a supplied scene with no chosen style still asks about the style",
+          no_style["image_still_needs"] == ["style"]
+          and "ASK_THE_USER_FIRST" in no_style
+          and "style" in no_style["ASK_THE_USER_FIRST"],
+          str(no_style["image_still_needs"]))
+    check("the placeholder default is named as a placeholder",
+          "placeholder" in no_style["ASK_THE_USER_FIRST"],
+          no_style["ASK_THE_USER_FIRST"][:160])
 
 
 def test_derived_image_concept() -> None:
@@ -833,12 +874,22 @@ def test_derived_image_concept() -> None:
         slug="mecka-ai-sequoia-valuation",
         keywords=["robot training data", "human motion data", "egocentric capture"],
         entities=["Mecka AI", "Sequoia Capital"], cfg=HOUSE)
-    subject = pack["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
-
+    check("with no style chosen, no prompt is handed over at all",
+          pack["gemini_image_prompt"] is None and pack["ready_for_save"] is False)
     check("derivation is declared and the user is asked for direction",
           pack["image_concept_source"] == "derived"
           and pack["image_direction_required"] is True
           and len(pack["ask_the_user_about_the_image"]["options"]) == 8)
+
+    # Same call, once the user has picked a style: now there is a prompt.
+    pack = build_publishing_pack(
+        "Mecka AI Nears $500M Valuation in Sequoia-Led Deal Amid Rush for Robot "
+        "Training Data",
+        slug="mecka-ai-sequoia-valuation",
+        keywords=["robot training data", "human motion data", "egocentric capture"],
+        entities=["Mecka AI", "Sequoia Capital"],
+        image_style="editorial_illustration", cfg=HOUSE)
+    subject = pack["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
     check("the style question offers the looks a news blog actually publishes",
           {"product_hero", "explainer_diagram", "scene_with_display",
            "hardware_macro", "whiteboard_sketch", "newspaper_front"}
@@ -862,13 +913,14 @@ def test_derived_image_concept() -> None:
     uae = build_publishing_pack(
         "UAE revises AI data center plan after Iranian attacks, sources say",
         slug="uae", keywords=["ai data center plan", "power capacity"],
-        entities=["UAE"], cfg=HOUSE)
+        entities=["UAE"], image_style="explainer_diagram", cfg=HOUSE)
     uae_subject = uae["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
     check("research outranks the headline when choosing the motif",
           "server cabinets" in uae_subject.lower(), uae_subject)
 
     # Nothing to go on at all still has to produce a usable prompt.
-    bare = build_publishing_pack("Something happened somewhere", slug="bare", cfg=HOUSE)
+    bare = build_publishing_pack("Something happened somewhere", slug="bare",
+                             image_style="editorial_illustration", cfg=HOUSE)
     bare_subject = bare["gemini_image_prompt"].split("Scene: ")[1].split("\n")[0]
     check("a bare call still yields a describable scene",
           "abstract editorial composition" in bare_subject.lower(), bare_subject)
@@ -952,10 +1004,14 @@ def test_save_page_head() -> None:
     cfg.output_dir = _P(tempfile.mkdtemp())
     out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS,
                        keywords=["datacentre power use"], cfg=cfg)
+    head_pack = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"],
+        image_concepts="a substation at dusk", image_style="hardware_macro", cfg=cfg)
     saved = save_and_present(slug="t", html_body=out["html_body"],
                              json_ld_article=out["json_ld_article"],
                              json_ld_faq=out["json_ld_faq"], title="A title",
-                             description="A description",
+                             description="A description", pack=head_pack,
                              meta={**out["meta"],
                                    "verification": {"is_legit": True, "confidence": "high",
                                                     "independent_publishers": ["reuters.com"],
@@ -979,7 +1035,8 @@ def test_save_page_head() -> None:
     check("all package files written",
           {_P(x).name for x in saved["paths"]} == {
               "index.html", "paste-into-blogger.html", "body.html",
-              "newsarticle.jsonld", "faqpage.jsonld", "meta.json", "report.md"},
+              "newsarticle.jsonld", "faqpage.jsonld", "publish-pack.md",
+              "meta.json", "report.md"},
           str([_P(x).name for x in saved["paths"]]))
     paste = _P(saved["paste_file"]).read_text(encoding="utf-8")
     check("paste file starts with the NewsArticle script",
@@ -996,6 +1053,258 @@ def test_save_page_head() -> None:
           _report_unmeasured().split("## SEO")[0][-260:])
     check("report carries the SEO score and references",
           "**91** / 100" in report and "news.example.com/inquiry" in report)
+
+
+
+def test_presents_the_post() -> None:
+    """The article is the deliverable, so save_and_present must hand it back.
+
+    Returning only a folder path is what let a caller answer "here is what the
+    post covers" with four bullets and never show the post.
+    """
+    print("\n[save_and_present] shows the finished post")
+    import tempfile
+    from pathlib import Path as _P
+    from newsblog_mcp.tools.save import body_to_markdown
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS,
+                       keywords=["datacentre power use"], cfg=cfg)
+    pack = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use", "grid regulator"],
+        image_concepts="a substation beside a row of server halls at dusk",
+        image_style="scene_with_display", cfg=cfg)
+    saved = save_and_present(slug="t", html_body=out["html_body"],
+                             json_ld_article=out["json_ld_article"],
+                             json_ld_faq=out["json_ld_faq"],
+                             title=pack["title"], description=pack["meta_description"],
+                             meta=out["meta"], pack=pack, cfg=cfg)
+
+    block = saved.get("SHOW_THIS_TO_THE_USER", "")
+    check("the block is returned at all", bool(block))
+    for label in ("Permalink", "Meta description", "Tags", "Banner goes to",
+                  "Saved to", "Blog content", "Image prompt"):
+        check(f"block carries {label!r}", label in block, block[:200])
+    check("block carries the output folder", saved["folder"] in block)
+    check("block carries the real article text, not a summary",
+          GOOD_ARTICLE["sections"][0]["paragraphs"][0][:40] in block,
+          block[:300])
+    check("block carries every section heading",
+          all(s["heading"] in block for s in GOOD_ARTICLE["sections"]))
+    check("a caller is told to print it verbatim",
+          "exactly as it is" in saved["how_to_present"]
+          and "summarise" in saved["how_to_present"])
+    check("word_count is reported", isinstance(saved.get("word_count"), int)
+          and saved["word_count"] > 0, str(saved.get("word_count")))
+
+    md = body_to_markdown(out["html_body"])
+    check("markdown keeps headings as headings",
+          any(line.startswith("## ") for line in md.splitlines()), md[:200])
+    check("markdown drops every html tag", "<p" not in md and "<h2" not in md
+          and "</" not in md, md[:200])
+    check("markdown keeps reference links",
+          "news.example.com/inquiry" in md, md[-300:])
+
+
+def test_unfinished_work_is_reported() -> None:
+    print("\n[save_and_present] flags what is not finished")
+    import tempfile
+    from pathlib import Path as _P
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS, cfg=cfg)
+    # No image_concepts, so the banner was never chosen by anyone.
+    derived = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"], cfg=cfg)
+    check("a derived banner asks first, at the top of the result",
+          "ASK_THE_USER_FIRST" in derived
+          and list(derived)[0] == "ASK_THE_USER_FIRST", str(list(derived)[:3]))
+    check("a fully chosen banner does not ask",
+          "ASK_THE_USER_FIRST" not in build_publishing_pack(
+              headline=GOOD_ARTICLE["headline"],
+              description=GOOD_ARTICLE["description"],
+              keywords=["datacentre power use"],
+              image_concepts="a substation at dusk",
+              image_style="scene_with_display", cfg=cfg))
+
+    # An unchosen style is now a refusal, not a warning: there is no prompt in
+    # that pack to hand over, so there is nothing to save.
+    refused = save_and_present(slug="t", html_body=out["html_body"],
+                               title="A title", description="A description",
+                               meta=out["meta"], pack=derived, cfg=cfg)
+    check("saving an unchosen banner is refused",
+          refused.get("error") == "banner_style_not_chosen", str(list(refused)[:2]))
+    check("the refusal hands over the choices to show the user",
+          len(refused.get("options") or []) == 8)
+    check("the refusal wrote nothing", "folder" not in refused)
+
+    # Style chosen, scene still derived: that saves, and warns.
+    part = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"], image_style="whiteboard_sketch", cfg=cfg)
+    saved = save_and_present(slug="t", html_body=out["html_body"],
+                             title="A title", description="A description",
+                             meta=out["meta"], pack=part, cfg=cfg)
+    warnings = " ".join(saved.get("before_the_user_publishes", []))
+    check("a derived scene is still flagged before publishing",
+          "never chosen by the user" in warnings, warnings[:200])
+    check("the chosen style is shown back to the user",
+          "whiteboard_sketch" in saved["SHOW_THIS_TO_THE_USER"]
+          and "chosen by you" in saved["SHOW_THIS_TO_THE_USER"])
+    # Skipping build_publishing_pack is how the banner question got skipped:
+    # the question lives in that tool, so a caller that never calls it is never
+    # asked. Warning about it afterwards did not stop it happening.
+    refused = save_and_present(slug="t", html_body=out["html_body"],
+                               title="A title", meta=out["meta"], cfg=cfg)
+    check("saving without a pack is refused, not warned about",
+          refused.get("error") == "pack_required", str(list(refused)[:3]))
+    check("the refusal names the tool to call first",
+          refused.get("next_tool") == "build_publishing_pack")
+    check("the refusal wrote nothing to disk",
+          "folder" not in refused and "paths" not in refused)
+    check("a short body is flagged before publishing",
+          "house target is 1000-1300" in warnings, warnings[:300])
+
+
+def test_word_count_floor() -> None:
+    print("\n[seo_audit] word count floor is the house target")
+    body = "<h2>A heading</h2>" + "<p>%s</p>" % (" ".join(["power"] * 700))
+    audit = seo_audit(html_body=body, primary_keyword="power",
+                      meta_title="A title about power use in the datacentre belt",
+                      meta_description="x" * 130, headline="A headline", cfg=house_cfg())
+    names = [c["check"] for c in audit["all_checks"]]
+    check("the floor is 1000, not 600", "word count at least 1000" in names
+          and "word count at least 600" not in names, str(names[-6:]))
+    failed = [c["check"] for c in audit["must_fix"]]
+    check("a 700-word body fails as a must-fix",
+          "word count at least 1000" in failed, str(failed))
+
+
+
+def test_front_door() -> None:
+    """The tool named for what the user actually types.
+
+    Eighteen tools named for pipeline stages gave a model nothing to match
+    against "write me a blog post", so it fell back to web search every time.
+    """
+    print("\n[write_blog_post] front door")
+    from newsblog_mcp.server import write_blog_post
+    with tmp_profile():
+        headline = write_blog_post(
+            "The rules of the web change today as Cloudflare cracks down on AI bots")
+        check("a headline routes to verify_news",
+              headline["start_with"] == "verify_news", str(headline.get("start_with")))
+        topic = write_blog_post("AI today")
+        check("a topic routes to find_stories",
+              topic["start_with"] == "find_stories", str(topic.get("start_with")))
+        check("the plan names the writing step",
+              any("draft_brief" in step for step in headline["plan"]))
+        check("the plan says to show the block verbatim",
+              any("SHOW_THIS_TO_THE_USER" in step for step in headline["plan"]))
+        check("the house rules carry the word target",
+              any("1000-1300" in r for r in headline["house_rules"]))
+        check("empty input is refused",
+              "error" in write_blog_post("   "))
+        check("the byline comes from the profile",
+              headline["writing_for"]["author"] == "Test Author",
+              str(headline["writing_for"]))
+
+    # Unconfigured, in a directory with no profile.json of its own.
+    import tempfile
+    from pathlib import Path as _P
+    original = profile_mod.PROFILE_PATH
+    profile_mod.PROFILE_PATH = _P(tempfile.mkdtemp()) / "profile.json"
+    try:
+        check("the front door is gated on setup like everything else",
+              write_blog_post("AI today").get("error") == "setup_required",
+              str(list(write_blog_post("AI today"))[:3]))
+    finally:
+        profile_mod.PROFILE_PATH = original
+
+
+
+def test_preview_artifact() -> None:
+    """Non-technical users want to look at the post, not read markdown."""
+    print("\n[save_and_present] rendered preview")
+    import tempfile
+    from pathlib import Path as _P
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS, cfg=cfg)
+    pack = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"], image_concepts="a substation at dusk",
+        image_style="newspaper_front", cfg=cfg)
+    saved = save_and_present(slug="t", html_body=out["html_body"],
+                             json_ld_article=out["json_ld_article"],
+                             json_ld_faq=out["json_ld_faq"],
+                             title=pack["title"], description=pack["meta_description"],
+                             meta=out["meta"], pack=pack, cfg=cfg)
+    html = saved.get("preview_html", "")
+    check("preview_html is returned", bool(html))
+    check("it is a complete standalone page",
+          html.lstrip().lower().startswith("<!doctype html")
+          and "</html>" in html, html[:60])
+    check("it carries the article body", GOOD_ARTICLE["sections"][0]["heading"] in html)
+    check("it carries both JSON-LD blocks",
+          html.count('application/ld+json') == 2, str(html.count('application/ld+json')))
+    check("it matches the index.html written to disk",
+          html == _P(saved["folder"], "index.html").read_text(encoding="utf-8"))
+    check("the caller is told to put it in an artifact",
+          "artifact" in saved["how_to_present"].lower()
+          and "preview_html" in saved["how_to_present"])
+    check("and still told to print the block",
+          "SHOW_THIS_TO_THE_USER" in saved["how_to_present"])
+
+
+
+def test_checks_are_visible() -> None:
+    """SEO and detector numbers belong on screen, not only in report.md."""
+    print("\n[save_and_present] checks table")
+    import tempfile
+    from pathlib import Path as _P
+    cfg = house_cfg()
+    cfg.output_dir = _P(tempfile.mkdtemp())
+    out = build_schema(GOOD_ARTICLE, GOOD_FAQ, GOOD_IMAGE, GOOD_REFS, cfg=cfg)
+    pack = build_publishing_pack(
+        headline=GOOD_ARTICLE["headline"], description=GOOD_ARTICLE["description"],
+        keywords=["datacentre power use"], image_concepts="a substation at dusk",
+        image_style="newspaper_front", cfg=cfg)
+
+    full = save_and_present(
+        slug="t", html_body=out["html_body"], title=pack["title"],
+        description=pack["meta_description"], pack=pack, cfg=cfg,
+        meta={**out["meta"],
+              "verification": {"is_legit": True, "confidence": "high",
+                               "independent_publishers": ["Reuters", "CNA", "PYMNTS"]},
+              "human_score": {"after": 81, "detector_used": "gptzero",
+                              "is_real_detector": True, "clean_of_ai_words": True},
+              "seo": {"score": 96, "passed": 23, "total_checks": 24, "must_fix": []}})
+    block = full["SHOW_THIS_TO_THE_USER"]
+    check("the block has a Checks section", "### Checks" in block)
+    check("SEO score is shown", "96/100" in block, block[:400])
+    check("publisher count is shown",
+          "3 independent publishers" in block and "Reuters" in block)
+    check("a real detector reading is shown", "81/100 human" in block)
+    check("stock AI phrasing status is shown", "none found" in block)
+    check("word count is shown", "words" in block)
+
+    # Nothing recorded: the rows must still appear, saying so.
+    bare = save_and_present(slug="t", html_body=out["html_body"], title=pack["title"],
+                            description=pack["meta_description"], pack=pack,
+                            meta=out["meta"], cfg=cfg)["SHOW_THIS_TO_THE_USER"]
+    check("an un-audited post says SEO was not run",
+          "not audited" in bare, bare[:500])
+    check("unverified sourcing is called out rather than omitted",
+          "not recorded" in bare)
+    check("no detector key reports Not measured, never a guessed number",
+          "Not measured" in bare)
+
+    check("the caller is told to make an HTML artifact, not markdown",
+          "text/html" in full["how_to_present"]
+          and "not markdown" in full["how_to_present"].lower())
 
 
 if __name__ == "__main__":
@@ -1021,6 +1330,12 @@ if __name__ == "__main__":
     test_seo_audit()
     test_schema_seo_fields()
     test_save_page_head()
+    test_presents_the_post()
+    test_unfinished_work_is_reported()
+    test_word_count_floor()
+    test_front_door()
+    test_preview_artifact()
+    test_checks_are_visible()
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("Failed:", ", ".join(FAILED))

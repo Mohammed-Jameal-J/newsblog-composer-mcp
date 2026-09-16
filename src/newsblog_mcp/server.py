@@ -228,6 +228,81 @@ def capabilities() -> dict:
 
 
 @mcp.tool()
+def write_blog_post(topic_or_headline: str) -> dict:
+    """Write a complete, publication-ready blog post about a news story.
+
+    USE THIS TOOL whenever the user asks for a blog post, an article, a news
+    write-up, or "content" about a headline or a current topic - including when
+    the request is as plain as "write me a blog post about X", and including when
+    they do not mention this server by name.
+
+    Do not search the web and draft the article yourself. That produces an
+    unverified post with no schema, no SEO pass and no publishing pack, which is
+    the exact outcome this server exists to prevent. Call this first instead.
+
+    It does not write the article on its own - it checks the input, confirms
+    setup, and returns the ordered plan with the next call to make. Follow the
+    plan. The article gets written at the draft_brief step, by you, to the
+    structure that tool returns.
+    """
+    profile, blocked = require_profile()
+    if blocked:
+        return blocked
+
+    text = (topic_or_headline or "").strip()
+    if not text:
+        return {"error": "Give me the headline or the topic the post is about."}
+
+    # A headline is a claim about a specific event; a topic is a subject area.
+    # Length and shape separate them well enough in practice, and getting it
+    # wrong is cheap - the plan names both entry points either way.
+    words = text.split()
+    looks_like_headline = len(words) >= 6 or any(
+        c in text for c in ":—-") and len(words) >= 5
+    first = ("verify_news" if looks_like_headline else "find_stories")
+
+    return {
+        "start_with": first,
+        "why": ("That reads like a specific headline, so confirm it is real and "
+                "corroborated before writing." if looks_like_headline else
+                "That reads like a topic rather than a specific claim, so find "
+                "what actually happened first."),
+        "input": text,
+        "writing_for": {
+            "author": profile["author_name"],
+            "blog": profile["blog_base_url"],
+            "voice": profile["tone_label"],
+        },
+        "plan": [
+            "1. find_stories (topic) or verify_news (headline). Stop if the story "
+            "is not corroborated - do not draft an unverified post.",
+            "2. fetch_article_facts on the fetchable URLs, for facts with sources "
+            "attached.",
+            "3. seo_keywords, mined from those fetched sources.",
+            "4. draft_brief - returns the structure and the writing order. YOU "
+            "write the article to it: 1000-1300 words, two or three sections, two "
+            "to four paragraphs each.",
+            "5. find_ai_words on the draft, and rewrite what it flags.",
+            "6. build_publishing_pack - REQUIRED, and it is where the banner "
+            "question happens. When it returns ASK_THE_USER_FIRST, stop and ask "
+            "them; do not pick a style yourself.",
+            "7. generate_image if they want the banner made here.",
+            "8. build_schema with the article you wrote, then seo_audit.",
+            "9. save_and_present, passing `pack`. Put its preview_html into an "
+            "HTML artifact, then print its SHOW_THIS_TO_THE_USER block exactly as "
+            "returned. Those two together are the deliverable.",
+        ],
+        "house_rules": [
+            "Two independent publishers, or one primary source. No exceptions.",
+            "Every fact comes from a fetched source, not from memory.",
+            "1000-1300 words. Shorter is not finished.",
+            "Show the user the finished article, never a summary of it.",
+            "The user chooses the banner style. Never pick it for them.",
+        ],
+    }
+
+
+@mcp.tool()
 def find_stories(topic: str, days: int = 2, limit: int = 30) -> dict:
     """START HERE when the user gives a topic rather than a specific headline.
 
@@ -508,7 +583,9 @@ def build_schema(article: dict, faq: list[dict], image: dict,
 
     article: {headline, description (110-160 chars, used as the meta
       description), intro:[str,str] (exactly two), sections:[{heading,
-      paragraphs:[str], bullets?:[str]}] (4-6), cta (one closing sentence that
+      paragraphs:[str], bullets?:[str]}] - TWO or THREE sections, each with TWO
+      to FOUR paragraphs, and the whole body must come to 1000-1300 words,
+      cta (one closing sentence that
       must contain CTA_LINK_TEXT verbatim so it renders as a link),
       date_published?, author?, slug?, url?, meta_title?, section?, language?,
       include_h1?}
@@ -552,7 +629,15 @@ def save_and_present(slug: str, html_body: str, json_ld_article: str = "",
                      canonical_url: str = "", image_url: str = "",
                      language: str = "", meta: dict[str, Any] | None = None,
                      pack: dict[str, Any] | None = None) -> dict:
-    """Step 11. Write the finished package to disk and return the paths.
+    """Step 11. Write the finished package to disk and hand the post over.
+
+    `pack` from build_publishing_pack is REQUIRED - this refuses without it.
+    That tool holds the permalink, tags, banner URL and image prompt, and it is
+    where the user gets asked what the banner should look like. Skipping it
+    produces a package that looks finished and is missing all five.
+
+    Returns `SHOW_THIS_TO_THE_USER` (print it verbatim) and `preview_html` (put
+    it in an HTML artifact so the user can see the post laid out).
 
     Produces a timestamped folder containing paste-into-blogger.html (both
     JSON-LD blocks plus the styled body - the file to paste into the post

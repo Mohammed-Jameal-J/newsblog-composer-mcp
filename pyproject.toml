@@ -1,6 +1,6 @@
 [project]
 name = "newsblog-composer-mcp"
-version = "0.4.1"
+version = "0.4.5"
 description = "MCP server that researches, verifies and audits news blog posts. The writer writes the prose."
 readme = "README.md"
 authors = [{ name = "Mohammed Jameal J" }]
