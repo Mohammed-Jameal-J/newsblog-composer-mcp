@@ -18,4 +18,8 @@ mcp-publisher.exe
 *.tar.gz
 *.mcpb
 
-Claude outputs/
+# Artwork source and README imagery. The bundle needs the six icons and nothing
+# else; shipping the full-resolution mascot made it 6.6 MB.
+assets/MCP LOGO MASCOT.png
+assets/mascot-600.png
+assets/make_icon.py

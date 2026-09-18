@@ -12,18 +12,18 @@
   "homepage": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp",
   "documentation": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp#readme",
   "support": "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp/issues",
-  "icon": "icon.png",
+  "icon": "assets/icon.png",
   "icons": [
     {
-      "src": "icon-128.png",
+      "src": "assets/icon-128.png",
       "size": "128x128"
     },
     {
-      "src": "icon-256.png",
+      "src": "assets/icon-256.png",
       "size": "256x256"
     },
     {
-      "src": "icon-512.png",
+      "src": "assets/icon-512.png",
       "size": "512x512"
     }
   ],

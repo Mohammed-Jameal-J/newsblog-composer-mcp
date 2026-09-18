@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="mascot-600.png" width="300" alt="NewsBlog Composer">
+<img src="https://raw.githubusercontent.com/Mohammed-Jameal-J/newsblog-composer-mcp/main/assets/mascot-600.png" width="300" alt="NewsBlog Composer">
 
 # NewsBlog Composer MCP
 

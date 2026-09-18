@@ -4,13 +4,20 @@ The mascot is a full-body illustration with a readable newspaper in it. That
 works at 600px in a README and is unreadable at 32px in the Extensions list, so
 this script cuts two different things from the same source:
 
-  mascot.png        the whole figure, background knocked out, for the README
-                    and the release banner
+  mascot-600.png    the whole figure, background knocked out, for the README
   icon-*.png        head and shoulders only, on a solid rounded tile, for the
                     app icon - because at 32px a full body is four grey pixels
                     and a hat, while a face still reads as a face
 
-Re-run it after editing the artwork: python make_icon.py <path-to-artwork>
+The full-resolution figure and the head and face crops are steps on the way to
+those, not deliverables, so they stay in memory. Everything this writes is
+something the project actually references; nothing here is an orphan.
+
+Everything lives in this folder, source artwork included, and every output is
+written beside the script rather than into the current working directory - so it
+behaves the same whether it is run from here or from the project root.
+
+Re-run it after editing the artwork: python assets/make_icon.py [artwork]
 """
 from __future__ import annotations
 
@@ -19,7 +26,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "MCP LOGO MASCOT.png")
+HERE = Path(__file__).resolve().parent
+SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "MCP LOGO MASCOT.png"
 TILE = (36, 32, 58)        # deep aubergine, pulled from the mascot's plumage
 ICON_SIZES = (512, 256, 128, 64, 32)
 
@@ -104,10 +112,9 @@ def main() -> None:
 
     art = knockout_white(Image.open(SRC))
     full = trim(art)
-    full.save("mascot.png")
     full.copy().resize(
         (600, int(600 * full.height / full.width)), Image.LANCZOS
-    ).save("mascot-600.png")
+    ).save(HERE / "mascot-600.png")
 
     # Head and hat only. The first cut reached far enough left to catch the
     # newspaper, and at 32px a slice of masthead beside the face is just noise
@@ -115,7 +122,6 @@ def main() -> None:
     w, h = full.size
     head = full.crop((int(w * 0.345), int(h * 0.015), int(w * 0.95), int(h * 0.385)))
     head = trim(head, pad=2)
-    head.save("mascot-head.png")
 
     # Below about 96px the hat stops being a hat and becomes a dark smudge
     # against a dark tile, so the small icons drop it and let the eyes and
@@ -130,19 +136,16 @@ def main() -> None:
         face = face.crop((left, 0, left + fh, fh))
     elif fh > fw:
         face = face.crop((0, 0, fw, fw))
-    face.save("mascot-face.png")
 
     for s in ICON_SIZES:
         small = s < 96
         build_icon(face if small else head, s,
-                   fill=0.94 if small else 0.82).save(f"icon-{s}.png")
-    build_icon(head, 256).save("icon.png")
+                   fill=0.94 if small else 0.82).save(HERE / f"icon-{s}.png")
+    build_icon(head, 256).save(HERE / "icon.png")
 
-    print(f"source {SRC.name} {art.size}")
-    print(f"mascot.png      {full.size}   full figure, transparent")
-    print(f"mascot-600.png  600px wide    README header")
-    print(f"mascot-head.png {head.size}   crop used for the icons")
-    print("icons:", ", ".join(f"icon-{s}.png" for s in ICON_SIZES), "+ icon.png")
+    print(f"source {SRC.name} {art.size} -> figure {full.size}, head {head.size}")
+    print("wrote  mascot-600.png (README header)")
+    print("wrote ", ", ".join(f"icon-{s}.png" for s in ICON_SIZES), "+ icon.png")
 
 
 if __name__ == "__main__":
