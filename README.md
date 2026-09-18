@@ -1,24 +1,62 @@
+<div align="center">
+
+<img src="mascot-600.png" width="300" alt="NewsBlog Composer">
+
 # NewsBlog Composer MCP
+
+**Headline in, publishable post out.**
+
+[![PyPI](https://img.shields.io/pypi/v/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-272%20passing-brightgreen)](tests/smoke_test.py)
+
+</div>
 
 <!-- mcp-name: io.github.Mohammed-Jameal-J/newsblog-composer -->
 
-**Headline in, publishable post out.** Give it a news headline or a topic and it
-verifies the story is real, downloads the sources, extracts the facts with
-attribution, mines the keywords, writes the article, and builds the SEO, schema,
-banner prompt and publishing pack around it.
+Give it a news headline or a topic and it verifies the story is real, downloads
+the sources, extracts the facts with attribution, mines the keywords, writes the
+article, and builds the SEO, schema, banner prompt and publishing pack around it.
 
-**Every fact traces to a source it fetched**, not to a model's memory. The server
-refuses to draft anything until at least two independent publishers carry the
-story, or a single primary source does. Facts, figures and quotes come out of
-articles it actually downloaded, and `build_schema` rejects reference URLs that
-are aggregator redirects rather than real publisher links.
+```
+"Write me a blog post about <a headline from today>"
 
-**The prose is machine-written and the tool says so.** `find_ai_words` and
-`score_ai_text` report local style signals; without a detector API key
-`score_ai_text` returns `Not measured` rather than inventing a number. If the
-byline is going to claim a person wrote it, that is the writer's call to make
-with their eyes open — `review_draft` exists so the draft gets edited rather than
-published raw.
+  verify_news          8 independent publishers, corroborated
+  fetch_article_facts  facts, quotes and figures, each with its source URL
+  seo_keywords         mined from the fetched text, not invented
+  draft_brief          structure + facts -> the article gets written
+  find_ai_words        stock phrasing flagged with the sentence it sits in
+  build_publishing_pack   asks YOU which of 8 banner styles you want
+  build_schema         NewsArticle + FAQPage JSON-LD, validated
+  seo_audit            93/100, nothing must-fix
+  save_and_present     the post, the checks, the image prompt, the files
+```
+
+## What it actually guarantees
+
+**Two independent publishers, or it will not draft.** Wire reprints are detected,
+so six outlets running one Reuters story are not mistaken for six sources, and a
+wide date spread downgrades confidence rather than passing silently.
+
+**Every fact traces to a source it fetched**, not to a model's memory. Facts,
+quotes and figures carry their `source_url`, and `build_schema` rejects reference
+links that are aggregator redirects rather than real publisher URLs.
+
+**You choose the banner.** With no style picked there is no image prompt in the
+result at all, and `save_and_present` refuses the package. The tool asks; it does
+not decide for you.
+
+**It will not hand you a post without the numbers.** `save_and_present` refuses
+unless the SEO audit and the AI-word check have both run, so the finished post
+always arrives with its scores attached.
+
+**The prose is machine-written and the tool says so.** Without a detector API key
+`score_ai_text` reports `Not measured` rather than inventing a reassuring number
+— a local style score measures cliche density and sentence rhythm, which is not a
+prediction of what a detector will say. If the byline is going to claim a person
+wrote it, that is your call to make with your eyes open; `review_draft` exists so
+the draft gets edited rather than published raw.
 
 **It runs with zero API keys.** Every credential is an upgrade, not a
 requirement. See [No keys? Start here](#no-keys-start-here).
@@ -27,82 +65,114 @@ requirement. See [No keys? Start here](#no-keys-start-here).
 
 ## Install
 
-```powershell
+### Claude Desktop — one click, no Python
+
+1. Download `newsblog-composer-<version>.mcpb` from
+   [Releases](https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp/releases/latest).
+2. Claude Desktop → **Settings → Extensions → Advanced settings → Install
+   Extension**.
+3. **Toggle the extension off and on.** On Windows the X button only minimises to
+   the tray, so without this the old server keeps running.
+4. **Add this line** to a Claude project's instructions, or to **Customize** so it
+   applies to every chat:
+
+   > When I ask for a blog post, an article, or a news write-up, always use the
+   > NewsBlog Composer tools. Start with `write_blog_post`. Never search the web
+   > and draft the article yourself.
+
+5. Ask for a post. It asks for your byline, company and blog domain once.
+
+**Step 4 is not optional.** A host's system prompt reads "write me a blog post"
+as "search the web and make an artifact", and an MCP server's `instructions`
+field cannot outrank that — there is no API for a server to claim priority.
+Without the line the client answers from web search and never mentions the
+extension. Naming the server in the request works for one-offs.
+
+Extensions are **desktop only**. On mobile or the web app there is nothing to
+call, and the client answers from web search without saying so.
+
+### From PyPI
+
+```bash
 pip install newsblog-composer-mcp
 ```
 
-That gives you the `newsblog-mcp` command. To hack on it instead, clone it.
+That gives you the `newsblog-mcp` command, which speaks MCP over stdio.
 
-Windows:
-
-```powershell
-git clone https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp.git
-cd newsblog-composer-mcp
-py -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-copy .env.example .env      # optional: every value in it is optional too
-```
-
-macOS / Linux:
+### From source
 
 ```bash
 git clone https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp.git
 cd newsblog-composer-mcp
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 cp .env.example .env        # optional: every value in it is optional too
 ```
 
-Check what it can do on your machine:
+Check it reaches the network before wiring it into a client — if search is
+blocked by a proxy or VPN, this is where you find out:
 
-```powershell
-python -m newsblog_mcp.diagnose "your test headline here"
-```
-
-That prints which providers are configured, which will be tried, and the result
-of a live `verify_news` call. Run it before wiring the server into a client —
-if search is blocked by a corporate proxy or VPN, this is where you find out.
-
-Offline test suite (no network needed):
-
-```powershell
-python tests\smoke_test.py
+```bash
+python -m newsblog_mcp.diagnose "a headline you saw in the news today"
 ```
 
 ## Connect it
 
-**Claude Desktop** — `%APPDATA%\Claude\claude_desktop_config.json`:
+### VS Code
+
+Create `.vscode/mcp.json` in your workspace:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "newsblog": {
-      "command": "C:\\path\\to\\newsblog-composer-mcp\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "newsblog_mcp.server"]
+      "type": "stdio",
+      "command": "newsblog-mcp"
     }
   }
 }
 ```
 
-On macOS the file is `~/Library/Application Support/Claude/claude_desktop_config.json`
-and the command is `/path/to/newsblog-composer-mcp/.venv/bin/python`.
+Reload the window, then open Chat in Agent mode — the tools appear under the
+tools picker. Use the full path to `newsblog-mcp` (or to the venv's Python with
+`"args": ["-m", "newsblog_mcp.server"]`) if the command is not on your PATH.
 
-**Claude Code** — `.mcp.json` in your project:
+### Claude Code
+
+`.mcp.json` in your project:
 
 ```json
 {
   "mcpServers": {
     "newsblog": {
-      "command": ".venv/Scripts/python.exe",
-      "args": ["-m", "newsblog_mcp.server"]
+      "command": "newsblog-mcp"
     }
   }
 }
 ```
 
-Any other MCP client: launch `python -m newsblog_mcp.server` over stdio.
+### Claude Desktop, configured by hand
+
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows,
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS:
+
+```json
+{
+  "mcpServers": {
+    "newsblog": {
+      "command": "newsblog-mcp"
+    }
+  }
+}
+```
+
+The `.mcpb` above does this for you and is the easier route.
+
+### Anything else
+
+Launch `newsblog-mcp` (or `python -m newsblog_mcp.server`) and speak MCP over
+stdio. For a remote client, `newsblog-mcp --http` serves a streamable HTTP
+endpoint — see [Publishing and connecting](#publishing-and-connecting).
 
 ### Where it keeps your files
 
