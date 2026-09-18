@@ -1,26 +1,34 @@
 """Where this server keeps the files it owns.
 
-There are two very different situations and they need different answers.
+Three situations, not two, and the third is the one that bit us.
 
-Running from a source checkout (``pip install -e .``, or straight from the
-cloned folder) the project directory is the right place: the author expects
-``output/`` and ``profile.json`` to sit next to the code where they can see
-them, and ``.env`` to be read from there.
+**A developer checkout** (``git clone``, ``pip install -e .``) writes beside the
+code. That is what the author expects: ``output/`` and ``profile.json`` next to
+the project, ``.env`` read from there.
 
-Installed as a package from PyPI, that same logic resolves to somewhere inside
-site-packages - which is the wrong answer twice over. Generated posts would be
-written into a virtualenv where nobody would look for them, and the identity
-profile would be destroyed by ``pip install --upgrade``, making the server ask
-its setup questions again after every upgrade. On a system-wide install it may
-not even be writable.
+**An installed package** (``pip install`` from PyPI) resolves to site-packages,
+which is wrong twice over - posts land inside a virtualenv where nobody looks,
+and the identity profile is destroyed by ``pip install --upgrade``. So it writes
+to the platform user data directory instead.
 
-So: source checkout keeps the old behaviour; an installed package writes to the
-platform's user data directory, which survives upgrades and belongs to the user
-rather than to the interpreter.
+**An installed .mcpb extension** looks exactly like a checkout: the packed
+extension contains ``pyproject.toml`` and ``src/``, so the original test said
+"checkout" and wrote into the extension's own folder. Claude Desktop replaces
+that folder wholesale on every upgrade, so installing a new version silently
+deleted the user's byline, their voice, and **every post they had ever
+generated**. Confirmed in the wild:
+
+    ...\Claude Extensions\local.mcpb.<author>.<name>\output\<post>
+
+An extension install is therefore detected explicitly - by where it sits, and by
+what a packed extension lacks (``.git`` and ``tests/`` are both excluded from the
+package) - and sent to the user data directory with everything else that must
+survive an upgrade.
 """
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -29,10 +37,37 @@ APP_NAME = "newsblog-composer-mcp"
 # <package>/paths.py -> <package> -> src -> project root
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
+# Directory names that only ever appear in an installed desktop extension.
+# "local.dxt." is the older prefix, kept so an extension installed before the
+# rename is still recognised.
+_EXTENSION_MARKERS = ("claude extensions", "claude-extensions")
+_EXTENSION_PREFIXES = ("local.mcpb.", "local.dxt.")
+
+
+def _is_extension_install(root: Path) -> bool:
+    """True when this copy was unpacked from a .mcpb by a desktop client."""
+    for part in root.parts:
+        lowered = part.lower()
+        if lowered in _EXTENSION_MARKERS:
+            return True
+        if lowered.startswith(_EXTENSION_PREFIXES):
+            return True
+    return False
+
 
 def _is_source_checkout(root: Path) -> bool:
-    """A checkout has the build files; an installed copy never does."""
-    return (root / "pyproject.toml").is_file() and (root / "src").is_dir()
+    """A working copy someone is developing in.
+
+    The build files alone are not enough - a packed extension has those too.
+    What a checkout also has, and the package deliberately does not, is version
+    control and the test suite; ``.mcpbignore`` excludes both. Requiring one of
+    them is what separates "I am working on this" from "this was installed".
+    """
+    if _is_extension_install(root):
+        return False
+    if not ((root / "pyproject.toml").is_file() and (root / "src").is_dir()):
+        return False
+    return (root / ".git").exists() or (root / "tests").is_dir()
 
 
 def user_data_dir() -> Path:
@@ -69,7 +104,33 @@ def data_dir() -> Path:
         # at import time, which would take the whole MCP server down.
         target = user_data_dir()
         target.mkdir(parents=True, exist_ok=True)
+    if target != _SOURCE_ROOT:
+        _rescue_from_extension_folder(target)
     return target
+
+
+def _rescue_from_extension_folder(target: Path) -> None:
+    """Move a profile stranded in an old extension folder into the data dir.
+
+    Anyone upgrading from a version that wrote beside the code has their byline,
+    company and voice sitting in a directory the next install will delete.
+    Copying it out on first run means they are not asked the setup questions
+    again, and they never find out this bug existed.
+
+    Best effort by design: a failure here must not stop the server starting, and
+    an existing profile in the data directory always wins.
+    """
+    stale = _SOURCE_ROOT / "profile.json"
+    fresh = target / "profile.json"
+    if fresh.exists() or not stale.is_file():
+        return
+    try:
+        shutil.copy2(stale, fresh)
+    except OSError:
+        return
+    # Leave the original in place. It is about to be deleted by the upgrade
+    # anyway, and removing it ourselves would destroy the only copy if the
+    # write above turned out to be somewhere unexpected.
 
 
 def dotenv_path() -> Path:
@@ -90,8 +151,10 @@ def default_output_dir() -> Path:
 def describe() -> dict:
     """For diagnose, so a user can see where their files actually go."""
     return {
-        "mode": "source checkout" if _is_source_checkout(_SOURCE_ROOT)
-                else "installed package",
+        "mode": ("source checkout" if _is_source_checkout(_SOURCE_ROOT)
+                 else "installed extension" if _is_extension_install(_SOURCE_ROOT)
+                 else "installed package"),
+        "code_at": str(_SOURCE_ROOT),
         "data_dir": str(data_dir()),
         "profile": str(profile_path()),
         "output": str(default_output_dir()),

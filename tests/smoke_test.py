@@ -945,12 +945,67 @@ def test_install_paths() -> None:
     """
     print("\n[paths] data locations survive being installed")
     import os
+    import tempfile
     from newsblog_mcp import paths
 
     check("a checkout is recognised as a checkout",
           paths._is_source_checkout(ROOT), str(ROOT))
     check("a site-packages layout is not",
           not paths._is_source_checkout(Path("/venv/Lib/site-packages")))
+
+    # The one that cost real data: a packed .mcpb contains pyproject.toml and
+    # src/, so the old test called it a checkout and wrote output/ and
+    # profile.json into the extension folder - which the next install replaces
+    # wholesale. Every generated post went with it.
+    ext = Path("C:/Users/x/AppData/Local/Packages/Claude_abc/LocalCache/Roaming"
+               "/Claude/Claude Extensions/local.mcpb.someone.newsblog-composer")
+    check("an installed extension is recognised as one",
+          paths._is_extension_install(ext), str(ext))
+    check("...and is NOT treated as a checkout",
+          not paths._is_source_checkout(ext))
+    check("the older local.dxt. prefix is recognised too",
+          paths._is_extension_install(Path("/x/local.dxt.someone.thing")))
+    check("an ordinary folder is not mistaken for an extension",
+          not paths._is_extension_install(Path("/home/me/projects/newsblog")))
+    check("diagnose reports the mode and where the code lives",
+          paths.describe()["mode"] == "source checkout"
+          and "code_at" in paths.describe(), str(paths.describe()["mode"]))
+
+    # Build files alone no longer prove a checkout - version control or the
+    # test suite has to be there too, and .mcpbignore excludes both.
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp) / "packed"
+        (fake / "src").mkdir(parents=True)
+        (fake / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        check("build files alone are not a checkout",
+              not paths._is_source_checkout(fake))
+        (fake / "tests").mkdir()
+        check("build files plus tests/ are",
+              paths._is_source_checkout(fake))
+
+    # Upgrading must not lose the byline someone already set.
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "data"
+        target.mkdir()
+        original = paths._SOURCE_ROOT
+        stale_root = Path(tmp) / "old-extension"
+        stale_root.mkdir()
+        (stale_root / "profile.json").write_text('{"author_name": "Kept"}',
+                                                 encoding="utf-8")
+        paths._SOURCE_ROOT = stale_root
+        try:
+            paths._rescue_from_extension_folder(target)
+            check("a stranded profile is carried over on upgrade",
+                  (target / "profile.json").read_text(encoding="utf-8")
+                  == '{"author_name": "Kept"}')
+            (target / "profile.json").write_text('{"author_name": "Newer"}',
+                                                 encoding="utf-8")
+            paths._rescue_from_extension_folder(target)
+            check("an existing profile is never overwritten by the old one",
+                  (target / "profile.json").read_text(encoding="utf-8")
+                  == '{"author_name": "Newer"}')
+        finally:
+            paths._SOURCE_ROOT = original
     check("in a checkout, files stay beside the code",
           paths.data_dir() == ROOT, str(paths.data_dir()))
     check("profile and output hang off the data dir",
@@ -959,7 +1014,6 @@ def test_install_paths() -> None:
 
     # The override has to win in either mode, so a user can put their posts
     # wherever they like.
-    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "elsewhere"
         os.environ["NEWSBLOG_DATA_DIR"] = str(target)
