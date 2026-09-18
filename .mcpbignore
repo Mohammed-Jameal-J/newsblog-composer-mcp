@@ -18,6 +18,17 @@ mcp-publisher.exe
 *.tar.gz
 *.mcpb
 
+# Saved posts. These carry the author's real name, company and blog domain, and
+# .gitignore covering them does NOT keep them out of the package - the two lists
+# are read by different tools. Removing this line ships that identity to every
+# person who installs the extension. It has happened once already.
+Claude outputs/
+output/
+
+# Stray file created by a bad shell redirect. Harmless, but it has no business
+# in a published archive.
+$null
+
 # Artwork source and README imagery. The bundle needs the six icons and nothing
 # else; shipping the full-resolution mascot made it 6.6 MB.
 assets/MCP LOGO MASCOT.png
