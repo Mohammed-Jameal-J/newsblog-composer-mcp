@@ -552,9 +552,9 @@ async def build_publishing_pack(headline: str, description: str = "",
 
     `image_style` MUST be the style the USER picked. Leave it empty and this
     tool asks them directly, through the client, and waits for the answer - do
-    not fill it in yourself. The eight styles are product_hero,
-    explainer_diagram, scene_with_display, hardware_macro, whiteboard_sketch,
-    newspaper_front, editorial_illustration and newsletter_header. With no style
+    not fill it in yourself. The styles it offers are listed in the result under
+    ask_the_user_about_the_image - show the user that list rather than a list
+    written here, which goes stale the moment a style is added. With no style
     chosen there is no image prompt in the result and save_and_present refuses
     the pack, because a banner the user was never asked about is the wrong
     banner.

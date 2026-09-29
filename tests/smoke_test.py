@@ -30,6 +30,7 @@ from newsblog_mcp.tools.pack import build_publishing_pack      # noqa: E402
 from newsblog_mcp.tools import profile as profile_mod          # noqa: E402
 from newsblog_mcp.tools.save import save_and_present          # noqa: E402
 from newsblog_mcp.tools.score import find_ai_words, score_ai_text  # noqa: E402
+from newsblog_mcp.tools.pack import _STYLE_CHOICES, _TEXT_ZONE
 from newsblog_mcp.tools.seo import seo_audit, seo_keywords    # noqa: E402
 
 PASSED, FAILED = [], []
@@ -904,7 +905,8 @@ def test_derived_image_concept() -> None:
     check("derivation is declared and the user is asked for direction",
           pack["image_concept_source"] == "derived"
           and pack["image_direction_required"] is True
-          and len(pack["ask_the_user_about_the_image"]["options"]) == 8)
+          and (len(pack["ask_the_user_about_the_image"]["options"])
+               == len(_STYLE_CHOICES)))
 
     # Same call, once the user has picked a style: now there is a prompt.
     pack = build_publishing_pack(
@@ -1226,7 +1228,8 @@ def test_unfinished_work_is_reported() -> None:
     check("saving an unchosen banner is refused",
           refused.get("error") == "banner_style_not_chosen", str(list(refused)[:2]))
     check("the refusal hands over the choices to show the user",
-          len(refused.get("options") or []) == 8)
+          len(refused.get("options") or []) == len(_STYLE_CHOICES),
+          str(len(refused.get("options") or [])))
     check("the refusal wrote nothing", "folder" not in refused)
 
     # Style chosen, scene still derived: that saves, and warns.
@@ -1560,6 +1563,22 @@ def test_server_asks_for_the_banner_style() -> None:
     described = srv._BannerStyleChoice.model_fields["style"].description
     missing = [v for v in offered if v not in described]
     check("every offered style is explained in the question", not missing, ", ".join(missing))
+
+    # The style list lives in THREE places: the Literal the tool accepts, the
+    # prompt fragments, and _STYLE_CHOICES - the list a user actually picks
+    # from. 0.5.3 added six styles to the first two and not the third, so the
+    # tool accepted fourteen while showing eight, and the test above passed
+    # because it only ever read the Literal. Compare the lists to each other.
+    shown = [c["value"] for c in _STYLE_CHOICES]
+    check("the styles shown to the user are the styles the tool accepts",
+          set(shown) == set(offered),
+          "only accepted: " + ", ".join(sorted(set(offered) - set(shown)))
+          + " | only shown: " + ", ".join(sorted(set(shown) - set(offered))))
+    check("every shown style has a label and a summary",
+          all(c.get("label") and c.get("summary") for c in _STYLE_CHOICES))
+    check("every offered style says where the headline sits",
+          not [v for v in offered if v not in _TEXT_ZONE],
+          ", ".join(v for v in offered if v not in _TEXT_ZONE))
 
     # No context, or a client that cannot be asked: no style, so no prompt, and
     # save_and_present refuses the pack. The guarantee survives the fallback.

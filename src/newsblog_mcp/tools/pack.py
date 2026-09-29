@@ -145,6 +145,12 @@ _TEXT_ZONE = {
     "newspaper_front": "as the main front-page headline beneath the masthead",
     "editorial_illustration": "in the left third, over flat empty ground",
     "newsletter_header": "centred beneath the subject",
+    "data_viz_card": "above the chart, with the axis labels left clear",
+    "portrait_feature": "in the empty side of the frame, away from the face",
+    "minimal_typography": "IS the artwork - set large and centred, nothing behind it",
+    "isometric_scene": "across the top, over the flat ground above the scene",
+    "dark_tech_glow": "in the lower left, over the darkest part of the frame",
+    "retro_print": "across the top in the second ink colour",
 }
 
 _STYLE_CHOICES = [
@@ -164,6 +170,18 @@ _STYLE_CHOICES = [
      "summary": "Drawn, flat colour, like an opinion page. When nothing concrete fits."},
     {"value": "newsletter_header", "label": "Newsletter header",
      "summary": "One simple subject, lots of space. Reads well small."},
+    {"value": "data_viz_card", "label": "Chart card",
+     "summary": "One clear chart as the whole image. For stories that turn on numbers."},
+    {"value": "portrait_feature", "label": "Portrait",
+     "summary": "A person where the story happens, unposed. For stories about people."},
+    {"value": "minimal_typography", "label": "Type only",
+     "summary": "The headline itself as the artwork. No photo, no illustration."},
+    {"value": "isometric_scene", "label": "Isometric 3D",
+     "summary": "A small tidy 3D scene of devices and figures, soft shadows."},
+    {"value": "dark_tech_glow", "label": "Dark with glow",
+     "summary": "Near-black ground, one cool accent light. Suits AI and security."},
+    {"value": "retro_print", "label": "Retro print",
+     "summary": "Risograph texture, two inks overprinting. Handmade, warm."},
 ]
 
 
@@ -406,7 +424,7 @@ def build_publishing_pack(
         asking = " and ".join(needs)
         result["ASK_THE_USER_FIRST"] = (
             f"STOP and ask the user about the banner {asking} before you finish. "
-            f"{'Show them the eight styles in ask_the_user_about_the_image and let them pick one. ' if 'style' in needs else ''}"
+            f"{'Show them every style in ask_the_user_about_the_image and let them pick one. ' if 'style' in needs else ''}"
             f"{'Ask what the picture should show, and offer suggested_subject as a starting point. ' if 'scene' in needs else ''}"
             f"Wait for their answer, then call this tool again with "
             f"image_style{' and image_concepts' if 'scene' in needs else ''} set. "
