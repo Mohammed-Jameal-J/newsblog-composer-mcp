@@ -467,6 +467,21 @@ def test_seo_keywords() -> None:
                   for a in out["secondary_keywords"] for b in out["secondary_keywords"]),
           str(out["secondary_keywords"]))
     check("entities extracted", bool(out["entities"]), str(out["entities"][:5]))
+
+    # The slug goes into the canonical URL, which is permanent once indexed.
+    # It used to be cut at exactly 70 characters and to carry the primary
+    # keyword in front of the title, which together produced
+    # "safety-standards-openai-cancels-gpt-6-1-astra-release-over-safety-conc".
+    from newsblog_mcp.textutil import slugify
+    long_title = ("OpenAI cancels the GPT-6.1 Astra model release after "
+                  "internal testing over safety concerns")
+    slug = slugify(long_title)
+    check("slug never ends mid-word",
+          slug.split("-")[-1] in long_title.lower().replace(".", "-").split(),
+          slug)
+    check("slug stays within the length limit", len(slug) <= 70, str(len(slug)))
+    check("slug does not carry the primary keyword in front of the title",
+          out["suggested_slug"].startswith("regulator"), out["suggested_slug"])
     check("meta description within 155 chars",
           len(out["suggested_meta_description"]) <= 155,
           str(len(out["suggested_meta_description"])))
@@ -1536,11 +1551,15 @@ def test_server_asks_for_the_banner_style() -> None:
     check("banner_text and banner_kicker reach the pack",
           {"banner_text", "banner_kicker"} <= set(sig.parameters))
 
-    check("the choice offers all eight styles",
-          len(srv._BannerStyleChoice.model_fields["style"].annotation.__args__) == 8)
+    offered = srv._BannerStyleChoice.model_fields["style"].annotation.__args__
+    check("the choice offers all fourteen styles", len(offered) == 14, str(len(offered)))
     check("every offered style is a real one",
-          all(v in _STYLES for v in
-              srv._BannerStyleChoice.model_fields["style"].annotation.__args__))
+          all(v in _STYLES for v in offered))
+    # An option the user can pick but cannot understand is not a choice. The
+    # description is the only thing the client renders beside the value.
+    described = srv._BannerStyleChoice.model_fields["style"].description
+    missing = [v for v in offered if v not in described]
+    check("every offered style is explained in the question", not missing, ", ".join(missing))
 
     # No context, or a client that cannot be asked: no style, so no prompt, and
     # save_and_present refuses the pack. The guarantee survives the fallback.

@@ -59,9 +59,23 @@ def sentences(text: str) -> list[str]:
 
 
 def slugify(text: str, max_len: int = 70) -> str:
+    """A slug that never ends mid-word.
+
+    The first version cut at exactly max_len characters, which produced
+    ``...-release-over-safety-conc``. A slug goes into the canonical URL, and a
+    canonical URL is permanent once it is indexed, so the cut falls back to the
+    last complete word - the same rule meta_title and meta_description already
+    used. A single word longer than max_len is still cut hard; there is nothing
+    else to do with it.
+    """
     text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
     text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
-    return (text[:max_len].rstrip("-")) or "post"
+    if len(text) <= max_len:
+        return text or "post"
+    cut = text[:max_len]
+    if "-" in cut:
+        cut = cut.rsplit("-", 1)[0]
+    return cut.rstrip("-") or "post"
 
 
 def strip_html(text: str) -> str:

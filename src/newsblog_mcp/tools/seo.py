@@ -208,7 +208,10 @@ def seo_keywords(
         "entities": [name for name, _ in entities.most_common(12)],
         "long_tail_queries": long_tail,
         "faq_query_candidates": questions,
-        "suggested_slug": slugify(f"{primary} {title}" if primary not in title.lower() else title),
+        # The title alone. Prepending the primary keyword stuffed the slug and
+        # pushed the words that identify the story past the length limit:
+        # "safety-standards-openai-cancels-gpt-6-1-astra-release-over-safety-conc".
+        "suggested_slug": slugify(title),
         "suggested_meta_title": meta_title,
         "suggested_meta_description": meta_description,
         "suggestion_errors": suggest_errors,

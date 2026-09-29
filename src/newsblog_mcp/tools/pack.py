@@ -94,6 +94,30 @@ _STYLES = {
     "newsletter_header": (
         "clean newsletter header, one large simple subject on a plain light "
         "ground, minimal detail, flat colour, generous empty space"),
+    "data_viz_card": (
+        "a single clear chart as the whole image, one line or a short row of "
+        "bars on a plain ground, axis labelled, two colours and a neutral, the "
+        "restrained look of a broadsheet business page"),
+    "portrait_feature": (
+        "environmental portrait of a person in the place the story happens, "
+        "natural window light, shallow depth of field, subject off-centre with "
+        "room for text, unposed and documentary rather than corporate"),
+    "minimal_typography": (
+        "the headline itself as the artwork, set large in a confident grotesque "
+        "across a plain ground, one accent colour, a rule or a single small "
+        "shape for weight, no photograph and no illustration"),
+    "isometric_scene": (
+        "isometric 3D illustration, a small tidy scene of devices, blocks and "
+        "figures on a flat ground, soft shadows, a limited palette of three "
+        "colours plus neutrals"),
+    "dark_tech_glow": (
+        "dark near-black ground, the subject picked out by one cool accent "
+        "light, fine grid or circuit texture low in the frame, high contrast, "
+        "a lot of empty dark space for text"),
+    "retro_print": (
+        "risograph print look, two ink colours overprinting with visible "
+        "halftone texture and slight misregistration, flat shapes, the warm "
+        "handmade feel of a screenprinted poster"),
     # Older keys, kept so existing calls still resolve.
     "editorial": ("editorial illustration in the style of a broadsheet opinion page, "
                   "flat shapes with restrained texture, two or three colours"),

@@ -488,16 +488,26 @@ class _BannerStyleChoice(BaseModel):
         "product_hero", "explainer_diagram", "scene_with_display",
         "hardware_macro", "whiteboard_sketch", "newspaper_front",
         "editorial_illustration", "newsletter_header",
+        "data_viz_card", "portrait_feature", "minimal_typography",
+        "isometric_scene", "dark_tech_glow", "retro_print",
     ] = Field(description=(
-        "product_hero: the object photographed on a clean bright surface. "
-        "explainer_diagram: labelled stages with arrows, for how-it-works "
-        "stories. scene_with_display: a real street or office photo with the "
-        "headline on a screen in the shot. hardware_macro: hands on the "
-        "hardware, shallow focus. whiteboard_sketch: the point drawn by hand on "
-        "an office whiteboard. newspaper_front: printed broadsheet front page "
-        "with the headline set large. editorial_illustration: drawn, flat "
-        "colour, like an opinion page. newsletter_header: one simple subject "
-        "with lots of space, reads well small."))
+        "PHOTOGRAPHIC - product_hero: the object on a clean bright surface. "
+        "scene_with_display: a real street or office with the headline on a "
+        "screen in the shot. hardware_macro: hands on the hardware, shallow "
+        "focus. portrait_feature: a person where the story happens, unposed; "
+        "for stories about people. "
+        "DRAWN - editorial_illustration: flat colour, like an opinion page. "
+        "isometric_scene: a small tidy 3D scene, soft shadows. retro_print: "
+        "risograph texture, two inks overprinting, handmade feel. "
+        "INFORMATION - explainer_diagram: labelled stages with arrows, for "
+        "how-it-works stories. data_viz_card: one clear chart as the whole "
+        "image; for stories that turn on numbers. whiteboard_sketch: the point "
+        "drawn by hand on an office whiteboard. "
+        "TYPE AND PRINT - newspaper_front: printed broadsheet front page. "
+        "minimal_typography: the headline itself as the artwork, no imagery. "
+        "newsletter_header: one simple subject, lots of space, reads well "
+        "small. dark_tech_glow: near-black ground, one cool accent light; "
+        "suits AI and security stories."))
 
 
 async def _ask_banner_style(ctx: Context | None) -> str:

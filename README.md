@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Mohammed-Jameal-J/newsblog-composer-mcp/main/assets/mascot-600.png" width="300" alt="NewsBlog Composer">
+<img src="https://raw.githubusercontent.com/Mohammed-Jameal-J/newsblog-composer-mcp/main/assets/logo-600.png" width="300" alt="NewsBlog Composer">
 
 # NewsBlog Composer MCP
 
@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-272%20passing-brightgreen)](tests/smoke_test.py)
+[![Tests](https://img.shields.io/badge/tests-285%20passing-brightgreen)](tests/smoke_test.py)
 
 </div>
 
@@ -176,8 +176,9 @@ endpoint — see [Publishing and connecting](#publishing-and-connecting).
 
 ### Where it keeps your files
 
-Installed from PyPI, the server writes to your user data directory, so nothing is
-lost when you upgrade:
+Installed any way other than a source checkout - from PyPI, or as a one-click
+Claude Desktop extension - the server writes to your user data directory, so
+nothing is lost when you upgrade:
 
 | | |
 |---|---|
@@ -189,6 +190,12 @@ That folder holds `profile.json` (the identity you set at first run), `output/`
 (every generated post) and an optional `.env`. Set `NEWSBLOG_DATA_DIR` to put
 them somewhere else. Run from a cloned checkout instead and everything stays in
 the project folder, beside the code.
+
+This matters for the extension install in particular. Claude Desktop replaces an
+extension's folder wholesale on every upgrade, so anything written beside the
+code is destroyed the first time you update. Before 0.5.2 that is exactly what
+happened, because a packed extension contains `pyproject.toml` and `src/` and
+looked like a developer checkout. It now writes to the data directory above.
 
 `python -m newsblog_mcp.diagnose` prints the exact paths for your install.
 
@@ -511,9 +518,10 @@ publishable.
 
 ```
 src/newsblog_mcp/
-  server.py         MCP entrypoint: 10 tools, 2 resources
+  server.py         MCP entrypoint: 19 tools, 2 resources
   diagnose.py       standalone connectivity check
   config.py         env loading, capability report
+  paths.py          decides where this install writes, and why
   textutil.py       tokenising, domains, sentence splitting, slugs
   providers/
     search.py       Tavily, Brave, Serper, Google CSE, NewsAPI, GDELT, RSS
@@ -525,5 +533,7 @@ src/newsblog_mcp/
   templates/        article.html.j2
   resources/        house_style.md, humanizer_patterns.md
 tests/smoke_test.py offline test suite
-output/             generated packages land here
+assets/             logo artwork, make_icon.py and the six app icons
+output/             generated packages, in a source checkout only - see
+                    "Where it keeps your files" for every other install
 ```
