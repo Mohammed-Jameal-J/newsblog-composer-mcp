@@ -18,6 +18,7 @@ import re
 from collections import Counter
 
 from ..config import CONFIG, Config
+from .links import suggest_internal_links
 from ..textutil import normalize, sentences, tokens
 
 # Openings that make a reader stop reading.
@@ -58,9 +59,42 @@ def draft_brief(
     numeric = [f.get("text", "") for f in facts if _NUMBER.search(f.get("text", ""))]
     quoted = [f.get("text", "") for f in facts if _QUOTE.search(f.get("text", ""))]
 
+    # Past posts worth linking to. Looked up here rather than left to the writer,
+    # because a link suggested after the draft is written gets bolted on as a
+    # "Related posts" list, which readers skip and crawlers discount. Arriving
+    # with the brief, it gets written into a sentence.
+    try:
+        internal = suggest_internal_links(
+            headline=headline,
+            primary_keyword=keywords.get("primary_keyword", ""),
+            keywords=keywords.get("secondary_keywords", []),
+            entities=keywords.get("entities", []),
+        )
+    except Exception:  # noqa: BLE001 - a missing index must not stop the brief
+        internal = {"suggestions": [], "indexed_posts": 0}
+
     return {
         "headline": normalize(headline),
         "target_length": "1000 to 1300 words",
+        "answer_first": (
+            "Open with a 40-60 word answer that stands on its own, before any "
+            "context. Under 40 it is not an answer; over 60 it gets truncated. "
+            "That block is what an assistant quotes and what a hurried reader "
+            "reads."
+        ),
+        "heading_shape": (
+            "Phrase section headings as the question a reader would actually type, "
+            "drawn from faq_candidates where one fits. A heading that is a question "
+            "is matched to a query; a heading that is a label is not."
+        ),
+        "internal_links": internal.get("suggestions", []),
+        "internal_links_note": (
+            "Work these into sentences as you write. Use the anchor text given, or "
+            "a phrase that reads naturally and still names the destination - never "
+            "'click here' or 'read more'. If the list is empty, link nothing: there "
+            "is no relevant earlier post, and an irrelevant internal link is worse "
+            "than none."
+        ),
         "structure": [
             "Two intro paragraphs. First says what happened. Second says why it "
             "matters, without editorialising.",

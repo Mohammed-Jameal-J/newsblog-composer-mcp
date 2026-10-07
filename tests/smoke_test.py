@@ -154,9 +154,21 @@ def test_schema_valid() -> None:
           out["canonical_url"]
           == "https://blog.example.com/2026/09/regulator-opens-inquiry-into-datacentre-power-use.html",
           out["canonical_url"])
-    check("paste_block carries both scripts then the body",
-          out["paste_block"].count("application/ld+json") == 2
-          and out["paste_block"].rstrip().endswith("</div>"))
+    # Three scripts now: NewsArticle, FAQPage and BreadcrumbList. The count is
+    # read off the result rather than hardcoded, so adding a fourth schema type
+    # does not fail a test that is really about ordering.
+    import json as _json
+    ld_keys = [k for k in out if k.startswith("json_ld_")]
+    check("paste_block carries every schema block, then the body",
+          out["paste_block"].count("application/ld+json") == len(ld_keys)
+          and out["paste_block"].rstrip().endswith("</div>"),
+          f"{out['paste_block'].count('application/ld+json')} script(s), {len(ld_keys)} schema(s)")
+    crumb = _json.loads(out["json_ld_breadcrumb"])
+    check("breadcrumb has two levels, site then post",
+          crumb["@type"] == "BreadcrumbList" and len(crumb["itemListElement"]) == 2
+          and crumb["itemListElement"][1]["item"] == out["canonical_url"])
+    article_ld = _json.loads(out["json_ld_article"])
+    check("speakable marks the answer span", "speakable" in article_ld)
     check("image url in <img> and in schema",
           GOOD_IMAGE["url"] in out["html_body"] and GOOD_IMAGE["url"] in out["json_ld_article"])
     check("reference url in body", GOOD_REFS[0]["url"] in out["html_body"])
@@ -468,6 +480,45 @@ def test_seo_keywords() -> None:
                   for a in out["secondary_keywords"] for b in out["secondary_keywords"]),
           str(out["secondary_keywords"]))
     check("entities extracted", bool(out["entities"]), str(out["entities"][:5]))
+
+    # The primary keyword decides the autocomplete expansion, which becomes the
+    # FAQ, which becomes the FAQPage schema. Frequency alone picked "safety
+    # standards" on a story about GPT-6.1 Astra, and the FAQ came back asking
+    # "what is osha safety standards". A named thing in the headline wins.
+    astra = seo_keywords(
+        "OpenAI cancels GPT-6.1 Astra release over safety concerns",
+        texts=["OpenAI will not release its latest artificial intelligence model, "
+               "Astra 6.1, after internal tests found it fell short of safety "
+               "standards, the maker of ChatGPT confirmed on Monday.",
+               "GPT-6.1 Astra was originally scheduled to be integrated into "
+               "OpenAI's conversational AI service ChatGPT and coding tool Codex.",
+               "Sachi Jain said the model performed poorly in alignment tests.",
+               "The model showed higher levels of deception than previous models."],
+        include_suggestions=False, cfg=CONFIG)
+    check("a named entity in the headline beats a frequent generic phrase",
+          astra["primary_keyword"] == "astra", astra["primary_keyword"])
+
+    # ...but only the bare name. Upgrading to a multi-word phrase that merely
+    # CONTAINS the entity brought back a junk adjective: "different claude
+    # instances" on a piece whose subject is Claude.
+    claude = seo_keywords(
+        "Anthropic ships a way to run different Claude instances side by side",
+        texts=["Anthropic has shipped a feature that lets developers run "
+               "different Claude instances side by side. Claude handles each "
+               "session separately. The Claude model family is unchanged."],
+        include_suggestions=False, cfg=CONFIG)
+    check("the entity wins bare, without a junk modifier wrapped around it",
+          claude["primary_keyword"] == "claude", claude["primary_keyword"])
+
+    # No capitalised entity in the headline: the phrase ranking still decides.
+    plain = seo_keywords(
+        "Regulator opens inquiry into datacentre power use",
+        texts=["The regulator has opened an inquiry into datacentre power use "
+               "across the region. Datacentre power use has risen sharply. "
+               "Operators say datacentre power use is measured inconsistently."],
+        include_suggestions=False, cfg=CONFIG)
+    check("with no entity in the headline the phrase ranking still decides",
+          "datacentre" in plain["primary_keyword"], plain["primary_keyword"])
 
     # The slug goes into the canonical URL, which is permanent once indexed.
     # It used to be cut at exactly 70 characters and to carry the primary
@@ -1591,6 +1642,133 @@ def test_server_asks_for_the_banner_style() -> None:
           asyncio.run(srv._ask_banner_style(_NoElicit())) == "")
 
 
+def test_internal_links() -> None:
+    print("\n[links] the index, the matcher and the floor")
+    import tempfile, os
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fresh_index():
+        old = os.environ.get("NEWSBLOG_DATA_DIR")
+        tmp = tempfile.mkdtemp()
+        os.environ["NEWSBLOG_DATA_DIR"] = tmp
+        try:
+            yield tmp
+        finally:
+            if old is None:
+                os.environ.pop("NEWSBLOG_DATA_DIR", None)
+            else:
+                os.environ["NEWSBLOG_DATA_DIR"] = old
+
+    from newsblog_mcp.tools.links import (record_post, load_index,
+                                          suggest_internal_links, MIN_SCORE)
+
+    with fresh_index():
+        check("an empty index suggests nothing and says why",
+              suggest_internal_links("anything")["suggestions"] == []
+              and "indexed" in suggest_internal_links("anything")["note"])
+
+        record_post("openai-astra", "OpenAI cancels GPT-6.1 Astra release",
+                    "https://blogs.example.com/2026/09/openai-astra",
+                    primary_keyword="astra", keywords=["alignment", "safety testing"],
+                    entities=["Astra", "OpenAI", "Codex"], published="2026-09-29")
+        record_post("eu-ai-act", "What the EU AI Act timeline means",
+                    "https://blogs.example.com/2026/08/eu-ai-act",
+                    primary_keyword="eu ai act", keywords=["regulation"],
+                    entities=["European Commission"], published="2026-08-11")
+        record_post("cat-cafe", "A cat cafe opened downtown",
+                    "https://blogs.example.com/2026/07/cat-cafe",
+                    primary_keyword="cat cafe", keywords=["coffee"],
+                    entities=["Whiskers"], published="2026-07-02")
+        check("posts are recorded", len(load_index()) == 3, str(len(load_index())))
+
+        # Re-recording the same slug updates rather than duplicating.
+        record_post("cat-cafe", "A cat cafe opened downtown (updated)",
+                    "https://blogs.example.com/2026/07/cat-cafe",
+                    primary_keyword="cat cafe", entities=["Whiskers"])
+        check("re-recording a slug updates it instead of duplicating",
+              len(load_index()) == 3, str(len(load_index())))
+
+        hit = suggest_internal_links(
+            headline="OpenAI delays the next Astra model again",
+            primary_keyword="astra", keywords=["alignment", "safety testing"],
+            entities=["Astra", "OpenAI"])
+        check("a related draft matches the related post",
+              [s["slug"] for s in hit["suggestions"]] == ["openai-astra"],
+              str([s["slug"] for s in hit["suggestions"]]))
+        check("the anchor describes the destination, not 'click here'",
+              hit["suggestions"][0]["anchor_text"] == "astra",
+              hit["suggestions"][0]["anchor_text"])
+        check("the match says why it matched",
+              "astra" in hit["suggestions"][0]["why"].lower())
+
+        # The whole point of the floor: a shared common word is not a reason to
+        # link. Linking on "any word in common" was the design to avoid.
+        miss = suggest_internal_links(headline="A new bakery opens on the high street",
+                                      primary_keyword="bakery", keywords=["bread"],
+                                      entities=["Dough Co"])
+        check("an unrelated draft links nothing rather than reaching",
+              miss["suggestions"] == [], str(miss["suggestions"]))
+        check("the floor is high enough that one shared keyword is not enough",
+              MIN_SCORE > 1.0, str(MIN_SCORE))
+
+        # A post never links to itself.
+        self_link = suggest_internal_links(
+            headline="OpenAI cancels GPT-6.1 Astra release", primary_keyword="astra",
+            entities=["Astra", "OpenAI"], exclude_slug="openai-astra")
+        check("a post is never offered a link to itself",
+              "openai-astra" not in [s["slug"] for s in self_link["suggestions"]])
+
+
+def test_aeo_audit() -> None:
+    print("\n[aeo] the second score, and what it measures")
+    from newsblog_mcp.config import Config
+    cfg = Config()
+    cfg.site_base_url = "https://blogs.example.com"
+
+    strong = """
+<p>OpenAI has cancelled the planned October release of GPT-6.1 Astra after internal
+safety testing found the model could act beyond a user's instructions and give an
+unreliable account of what it had done, the company confirmed on Monday this week.</p>
+<h2>What went wrong in testing?</h2>
+<p>Alignment scores fell by 12 percent and scope authorisation failed repeatedly.</p>
+<h2>Why does this matter for agents?</h2>
+<p>Autonomy raises the cost of a model that misreports its own actions.</p>
+<h3>Was it released?</h3><p>No.</p><h3>When was it due?</h3><p>October.</p>
+<h3>What is scope?</h3><p>Staying inside the task.</p>
+<p><a href="https://france24.com/x" rel="noopener">France 24</a> and
+<a href="https://wsj.com/y" rel="noopener">WSJ</a> reported it. See our
+<a href="https://blogs.example.com/a">alignment testing</a> and
+<a href="https://blogs.example.com/b">agent safety</a> posts.</p>
+"""
+    out = seo_audit(strong, "astra", ["alignment", "safety"],
+                    meta_title="OpenAI cancels GPT-6.1 Astra release over safety",
+                    meta_description="x" * 120, slug="openai-cancels-astra",
+                    headline="OpenAI cancels GPT-6.1 Astra release", cfg=cfg)
+    check("seo_audit returns an AEO score of its own", "aeo" in out
+          and isinstance(out["aeo"].get("score"), int), str(out.get("aeo", {}).get("score")))
+    check("a well-structured post scores well on AEO",
+          out["aeo"]["score"] >= 80, str(out["aeo"]["score"]))
+    check("internal and external links are counted apart",
+          any(c["check"].startswith("at least 2 internal") and c["ok"]
+              for c in out["all_checks"]))
+
+    weak = ("<p>Short lead.</p><h2>Background</h2>"
+            "<p>" + "A sentence here. " * 9 + "</p>"
+            '<p><a href="https://blogs.example.com/a">click here</a></p>')
+    bad = seo_audit(weak, "astra", [], meta_title="t" * 40,
+                    meta_description="x" * 120, slug="a-b-c", headline="h", cfg=cfg)
+    check("a wall of text with a short lead scores badly on AEO",
+          bad["aeo"]["score"] < out["aeo"]["score"], str(bad["aeo"]["score"]))
+    check("the opening answer length is checked",
+          any("40-60 word" in c["check"] and not c["ok"] for c in bad["aeo"]["all_checks"]))
+    check("'click here' fails the anchor check",
+          any("anchor text" in c["check"] and not c["ok"] for c in bad["all_checks"]))
+    check("a missing internal link is flagged, not silently passed",
+          any(c["check"].startswith("at least 2 internal") and not c["ok"]
+              for c in bad["all_checks"]))
+
+
 if __name__ == "__main__":
     test_schema_valid()
     test_schema_catches_mismatch()
@@ -1611,6 +1789,8 @@ if __name__ == "__main__":
     test_publishing_pack()
     test_derived_image_concept()
     test_install_paths()
+    test_internal_links()
+    test_aeo_audit()
     test_seo_audit()
     test_schema_seo_fields()
     test_save_page_head()

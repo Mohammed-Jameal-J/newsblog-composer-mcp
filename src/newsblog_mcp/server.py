@@ -34,6 +34,7 @@ from .tools.profile import (TONES, answer_template, clear_profile, load_profile,
                             setup_required_response, tone_guidance)
 from .tools.save import save_and_present as _save_and_present
 from .tools.schema import build_schema as _build_schema
+from .tools.links import suggest_internal_links as _suggest_internal_links
 from .tools.seo import seo_audit as _seo_audit
 from .tools.seo import seo_keywords as _seo_keywords
 from .tools.stories import find_stories as _find_stories
@@ -603,6 +604,40 @@ def generate_image(prompt: str, style: Literal["banner", "square"] = "banner",
     if blocked:
         return blocked
     return _generate_image(prompt, style=style, slug=slug, cfg=_cfg())
+
+
+@mcp.tool()
+def suggest_internal_links(headline: str,
+                           primary_keyword: str = "",
+                           keywords: list[str] | None = None,
+                           entities: list[str] | None = None,
+                           exclude_slug: str = "",
+                           limit: int = 4) -> dict:
+    """Earlier posts of your own worth linking to from this draft.
+
+    These are INTERNAL links - your post pointing at your posts. They are not
+    backlinks: a backlink is a link on somebody else's site, and no tool can
+    create one. Internal links are the half you control, and they are what
+    passes authority between your pages and builds topical depth.
+
+    draft_brief already calls this, so you normally do not need to. Call it
+    directly to re-check a draft, or to see what the index holds.
+
+    Matching is strict on purpose: a shared named entity is evidence, a shared
+    common word is not. When nothing clears the relevance floor it returns an
+    empty list, and that is the right answer - an irrelevant internal link is
+    worse than no link at all.
+
+    The index fills as save_and_present writes each post, so this returns
+    nothing until you have published more than one.
+    """
+    blocked = _gate()
+    if blocked:
+        return blocked
+    return _suggest_internal_links(
+        headline=headline, primary_keyword=primary_keyword,
+        keywords=keywords or [], entities=entities or [],
+        exclude_slug=exclude_slug, limit=limit)
 
 
 @mcp.tool()

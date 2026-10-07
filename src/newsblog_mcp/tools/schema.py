@@ -81,6 +81,15 @@ def _split_cta(text: str, link_text: str) -> tuple[str, str]:
     return text, ""
 
 
+def cfg_author_urls(cfg) -> list[str]:
+    """Profile URLs for the byline, from config. Empty when none are set - an
+    invented profile link is worse than no sameAs at all."""
+    raw = getattr(cfg, "author_profile_urls", "") or ""
+    if isinstance(raw, (list, tuple)):
+        return [str(u).strip() for u in raw if str(u).strip()]
+    return [u.strip() for u in str(raw).split(",") if u.strip()]
+
+
 def build_schema(
     article: dict,
     faq: list[dict],
@@ -168,10 +177,48 @@ def build_schema(
     }
     if keywords:
         json_ld_article["keywords"] = ", ".join(keywords)
+
+    # --- entity and answer-engine signals ------------------------------------
+    # An assistant deciding whether this page answers a question needs to know
+    # what the page is ABOUT, not only which words it repeats. `about` is the
+    # subject; `mentions` is everything else it names. Both are Things rather
+    # than strings, which is what makes them entity signals rather than tags.
+    entities = [normalize(e) for e in (article.get("entities") or []) if normalize(e)]
+    if entities:
+        json_ld_article["about"] = {"@type": "Thing", "name": entities[0]}
+        if len(entities) > 1:
+            json_ld_article["mentions"] = [
+                {"@type": "Thing", "name": e} for e in entities[1:8]]
+
+    # The byline is a credibility signal only if it resolves to a real person.
+    # A name on its own does not; a name with a profile behind it does.
+    author_links = [u for u in (article.get("author_urls") or cfg_author_urls(cfg)) if u]
+    if author_links:
+        json_ld_article["author"]["sameAs"] = author_links
+
+    # Marks the span worth reading aloud or lifting as the answer. Nothing here
+    # invents content: it points at the headline and summary already on the page.
+    json_ld_article["speakable"] = {
+        "@type": "SpeakableSpecification",
+        "cssSelector": ["h1", ".post-summary", "article > p:first-of-type"],
+    }
     if article.get("section"):
         json_ld_article["articleSection"] = normalize(article["section"])
     json_ld_article["inLanguage"] = article.get("language") or cfg.default_language
     json_ld_article["wordCount"] = word_count
+
+    # Where the page sits in the site. Two levels only - inventing a category
+    # tier the blog does not actually have would be marking up something no
+    # reader can see, which is the one rule structured data has.
+    json_ld_breadcrumb = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": cfg.site_name,
+             "item": cfg.site_base_url.rstrip("/")},
+            {"@type": "ListItem", "position": 2, "name": headline, "item": canonical},
+        ],
+    }
 
     json_ld_faq = {
         "@context": "https://schema.org",
@@ -200,6 +247,7 @@ def build_schema(
         "word_count": word_count,
         "json_ld_article": json.dumps(json_ld_article, indent=2, ensure_ascii=False),
         "json_ld_faq": json.dumps(json_ld_faq, indent=2, ensure_ascii=False),
+        "json_ld_breadcrumb": json.dumps(json_ld_breadcrumb, indent=2, ensure_ascii=False),
         "html_body": html_body,
         "paste_block": (
             f'<script type="application/ld+json">\n'
@@ -207,6 +255,9 @@ def build_schema(
             f'</script>\n\n'
             f'<script type="application/ld+json">\n'
             f'{json.dumps(json_ld_faq, indent=2, ensure_ascii=False)}\n'
+            f'</script>\n\n'
+            f'<script type="application/ld+json">\n'
+            f'{json.dumps(json_ld_breadcrumb, indent=2, ensure_ascii=False)}\n'
             f'</script>\n\n'
             f'{html_body}'
         ),

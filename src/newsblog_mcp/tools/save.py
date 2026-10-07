@@ -17,6 +17,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from ..config import CONFIG, Config
+from .links import record_post
 from ..textutil import normalize, slugify
 
 _PAGE = """<!doctype html>
@@ -393,6 +394,24 @@ def save_and_present(
         report_path.write_text(report, encoding="utf-8")
         written.append(str(report_path))
 
+    # Record the post so the next one can link to it. Best effort on purpose:
+    # the index is a convenience, and failing to write it must never cost the
+    # user the post that was just produced.
+    index_result = {"ok": False, "reason": "not attempted"}
+    try:
+        kw = meta.get("keywords") if isinstance(meta, dict) else {}
+        kw = kw if isinstance(kw, dict) else {}
+        index_result = record_post(
+            slug=slug or slugify(title),
+            title=title or (pack or {}).get("title", ""),
+            url=(pack or {}).get("full_url", "") or canonical_url,
+            primary_keyword=kw.get("primary_keyword", ""),
+            keywords=kw.get("secondary_keywords", []) or (meta.get("keywords_list") or []),
+            entities=kw.get("entities", []) or (meta.get("entities") or []),
+        )
+    except Exception as exc:  # noqa: BLE001
+        index_result = {"ok": False, "reason": str(exc)}
+
     display = _display_block(
         folder=folder,
         article_markdown=article_markdown,
@@ -433,6 +452,10 @@ def save_and_present(
             "put straight into an artifact."
         ),
         "folder": str(folder),
+        # Said out loud rather than hidden. The index is what makes the NEXT
+        # post able to link back to this one, and a silent failure here would
+        # show up weeks later as "internal links never work".
+        "internal_link_index": index_result,
         "paths": written,
         "paste_file": str(folder / "paste-into-blogger.html"),
         "article_markdown": article_markdown,
@@ -487,6 +510,21 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
     else:
         seo_line = "_not audited - run seo_audit and pass it in `meta.seo`_"
 
+    # AEO rides along inside the seo_audit result, so there is nothing extra for
+    # a caller to pass - but it is reported on its own line, because the two
+    # numbers measure different things and a post can be strong on one and weak
+    # on the other.
+    aeo = as_dict(seo.get("aeo"))
+    if aeo:
+        aeo_must = aeo.get("must_fix") or []
+        aeo_must = aeo_must if isinstance(aeo_must, list) else []
+        aeo_line = (f"**{aeo.get('score', '?')}/100** "
+                    f"({aeo.get('passed', '?')}/{aeo.get('total_checks', '?')} checks"
+                    + (f", {len(aeo_must)} must-fix" if aeo_must else ", nothing must-fix")
+                    + ")")
+    else:
+        aeo_line = "_not audited - seo_audit returns this under `aeo`_"
+
     if scores.get("is_real_detector"):
         after = scores.get("after")
         human = (f"**{after}/100 human** "
@@ -519,6 +557,7 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
         else "| Banner style | _not confirmed - ask which style they want_ |",
         f"| Length | {length} |",
         f"| SEO | {seo_line} |",
+        f"| AEO | {aeo_line} |",
         f"| Stock AI phrasing | {stock} |",
         f"| AI detection | {human} |",
     ]

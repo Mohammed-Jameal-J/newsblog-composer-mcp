@@ -16,7 +16,7 @@ from html.parser import HTMLParser
 
 from ..config import CONFIG, Config
 from ..providers.suggest import expand
-from ..textutil import normalize, sentences, slugify, tokens
+from ..textutil import normalize, registrable_domain, sentences, slugify, tokens
 
 _STOP = {
     # Core function words. These were only partly covered, which let phrases like
@@ -89,6 +89,11 @@ _SEGMENT_RE = re.compile(r"[.,;:!?()\[\]{}\"\u201c\u201d\u2018\u2019\u2026/|]+|\
 _WORD_RE = re.compile(r"[a-z0-9][a-z0-9'\-]*")
 # No dot inside the pattern: allowing one made "DSP. Qualcomm" match as a single
 # entity across a sentence boundary. Entities are extracted per sentence too.
+_WEAK_ANCHORS = {
+    "click here", "here", "read more", "more", "this", "this post", "link",
+    "this article", "see more", "learn more", "find out more", "read this",
+}
+
 _ENTITY_RE = re.compile(r"\b([A-Z][a-zA-Z0-9&'-]+(?:\s+[A-Z][a-zA-Z0-9&'-]+){0,3})\b")
 
 
@@ -167,17 +172,10 @@ def seo_keywords(
     multiword = [p for p in ranked if " " in p]
 
     title_tokens = tokens(title)
-    # Prefer a multi-word phrase, but only one that is actually carrying the
-    # article. Taking any multi-word phrase over a much stronger single word
-    # picked "different claude instances" on a piece whose subject was Claude.
-    top_score = scores[ranked[0]] if ranked else 0.0
-    primary = ranked[0] if ranked else title.lower()
-    for phrase in multiword:
-        if set(phrase.split()) & title_tokens and scores[phrase] >= top_score * 0.45:
-            primary = phrase
-            break
-    secondary = _dedupe_phrases([p for p in ranked if p != primary], 10)
 
+    # Entities are extracted BEFORE the primary keyword is chosen, because the
+    # thing a news story is about is almost always a named thing, and frequency
+    # alone does not find it.
     entities = Counter()
     for sentence in (sentences(body) or [title]):
         # Skip the first word of each sentence: it is capitalised by grammar, not
@@ -189,6 +187,40 @@ def seo_keywords(
     # Sentence openers are already skipped above, so a single mention is real
     # evidence now. Filtering on count here was dropping every proper noun that
     # appeared once - which is most of them in a short news piece.
+
+    # The entities the HEADLINE names. An entity buried in paragraph nine is not
+    # what the piece is about; one in the title is.
+    titled_entities = [name for name, _ in entities.most_common()
+                       if tokens(name) & title_tokens]
+
+    # Prefer a multi-word phrase, but only one that is actually carrying the
+    # article. Taking any multi-word phrase over a much stronger single word
+    # picked "different claude instances" on a piece whose subject was Claude.
+    top_score = scores[ranked[0]] if ranked else 0.0
+    primary = ranked[0] if ranked else title.lower()
+    fallback = primary
+    for phrase in multiword:
+        if set(phrase.split()) & title_tokens and scores[phrase] >= top_score * 0.45:
+            fallback = phrase
+            break
+    primary = fallback
+
+    # ...but a named entity in the headline beats both. On a story about
+    # GPT-6.1 Astra the frequency ranking chose "safety standards", because the
+    # phrase recurred and the product name did not. The autocomplete expansion
+    # then returned "osha safety standards" and "fire safety is standards", and
+    # those became the FAQ and the FAQPage schema. A generic phrase that happens
+    # to repeat is not the subject; the thing the headline names is.
+    # The bare name, deliberately. The first attempt at this upgraded to a
+    # multi-word phrase containing the entity, which brought back the exact
+    # failure the comment above describes: on a piece about Claude it chose
+    # "different claude instances", a junk adjective wrapped around the subject.
+    # The entity on its own is what people search for and what an answer engine
+    # matches the page to.
+    if titled_entities:
+        primary = titled_entities[0].lower().rstrip("'s").rstrip("'")
+
+    secondary = _dedupe_phrases([p for p in ranked if p != primary], 10)
 
     long_tail, questions, suggest_errors = ([], [], [])
     if include_suggestions:
@@ -236,8 +268,11 @@ class _Doc(HTMLParser):
         self.headings: list[tuple[str, str]] = []
         self.images: list[dict] = []
         self.links: list[dict] = []
+        self.paragraphs: list[str] = []
         self._tag: str | None = None
         self._buf: list[str] = []
+        self._link_buf: list[str] | None = None
+        self._para_buf: list[str] | None = None
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -247,17 +282,35 @@ class _Doc(HTMLParser):
             self.images.append({"src": a.get("src", ""), "alt": a.get("alt", ""),
                                 "title": a.get("title", "")})
         elif tag == "a":
-            self.links.append({"href": a.get("href", ""), "rel": a.get("rel", "")})
+            # The anchor's words matter as much as its target: "click here" tells
+            # a crawler nothing about where it points.
+            self.links.append({"href": a.get("href", ""), "rel": a.get("rel", ""),
+                               "text": ""})
+            self._link_buf = []
+        elif tag == "p":
+            self._para_buf = []
 
     def handle_endtag(self, tag):
         if tag == self._tag:
             self.headings.append((tag, normalize("".join(self._buf))))
             self._tag = None
+        elif tag == "a" and self.links and self._link_buf is not None:
+            self.links[-1]["text"] = normalize("".join(self._link_buf))
+            self._link_buf = None
+        elif tag == "p" and self._para_buf is not None:
+            para = normalize("".join(self._para_buf))
+            if para:
+                self.paragraphs.append(para)
+            self._para_buf = None
 
     def handle_data(self, data):
         self.text_parts.append(data)
         if self._tag:
             self._buf.append(data)
+        if self._link_buf is not None:
+            self._link_buf.append(data)
+        if self._para_buf is not None:
+            self._para_buf.append(data)
 
     @property
     def text(self) -> str:
@@ -376,11 +429,33 @@ def seo_audit(
           any(set(primary.split()) & set(i["alt"].lower().split()) for i in doc.images),
           "low")
 
-    external = [l for l in doc.links if l["href"].startswith("http")]
+    # Internal and external links do different jobs and are counted separately.
+    # Lumping them together let a post with six citations and no internal links
+    # look fully linked, when the half you actually control was missing.
+    own_domain = registrable_domain(getattr(cfg, "site_base_url", "") or "")
+    linked = [l for l in doc.links if l["href"].startswith("http")]
+    internal = [l for l in linked if own_domain and registrable_domain(l["href"]) == own_domain]
+    external = [l for l in linked if l not in internal]
+
     check("at least 2 external source links", len(external) >= 2, "high",
           f"{len(external)} link(s)")
+    check("no more than 5 external links", len(external) <= 5, "low",
+          f"{len(external)} link(s); past five the page leaks authority")
     check("external links carry rel attributes",
           all(l["rel"] for l in external), "low")
+
+    # Internal links are the only links on the page you control. They are scored
+    # at medium rather than high because a brand-new blog genuinely has nothing
+    # to link to, and failing every first post would train people to ignore the
+    # audit.
+    check("at least 2 internal links to your own posts", len(internal) >= 2, "medium",
+          f"{len(internal)} internal link(s)"
+          + ("" if own_domain else " - set SITE_BASE_URL so internal links can be told apart"))
+    weak_anchors = [l["text"] for l in internal
+                    if normalize(l["text"]).lower() in _WEAK_ANCHORS or len(l["text"]) < 4]
+    check("internal anchor text describes the destination",
+          not weak_anchors, "medium",
+          f"weak: {weak_anchors[:3]}" if weak_anchors else "")
 
     check("FAQ section present", len(h3s) >= 3, "medium", f"{len(h3s)} H3 question(s)")
 
@@ -389,7 +464,72 @@ def seo_audit(
     total = sum(weights[c["severity"]] for c in checks)
     failed = [c for c in checks if not c["ok"]]
 
+    # ----------------------------------------------------------------- AEO --
+    # Answer Engine Optimisation: being QUOTED by an assistant rather than
+    # clicked from a results page. It is scored separately because it rewards
+    # different things - a post can be well optimised for search and useless to
+    # quote, and the two numbers moving apart is information the writer wants.
+    #
+    # The hard part of AEO is sourced facts, and this server already has that.
+    # What these check is structure, which is the part that goes missing.
+    aeo: list[dict] = []
+
+    def aeo_check(name: str, ok: bool, severity: str, detail: str = "") -> None:
+        aeo.append({"check": name, "ok": bool(ok), "severity": severity, "detail": detail})
+
+    paras = [par for par in doc.paragraphs if len(par.split()) > 5]
+
+    # A self-contained 40-60 word answer at the top is the single most cited
+    # shape. Longer and it gets truncated; shorter and it is not an answer.
+    lead = paras[0] if paras else ""
+    lead_words = len(lead.split())
+    aeo_check("opens with a 40-60 word direct answer", 40 <= lead_words <= 60, "high",
+              f"{lead_words} words" if lead else "no opening paragraph found")
+
+    # Headings shaped as the question a reader would type.
+    _Q = ("what", "why", "how", "when", "where", "who", "which", "is", "are",
+          "does", "do", "can", "will", "should")
+    questioned = [h for h in h2s
+                  if h.strip().endswith("?") or h.lower().split()[:1] and h.lower().split()[0] in _Q]
+    aeo_check("at least half the H2s are questions",
+              bool(h2s) and len(questioned) * 2 >= len(h2s), "medium",
+              f"{len(questioned)} of {len(h2s)}")
+
+    # Short paragraphs survive extraction; a wall of text does not.
+    long_paras = [par for par in paras if len(sentences(par)) > 4]
+    aeo_check("paragraphs are 4 sentences or fewer", not long_paras, "medium",
+              f"{len(long_paras)} paragraph(s) run longer")
+
+    # A number with a source attached is the most quotable thing on the page.
+    has_figure = bool(re.search(r"\b\d[\d,.]*\s*(%|percent|million|billion|bn|m\b)", text, re.I)) \
+        or bool(re.search(r"\b(19|20)\d\d\b", text))
+    aeo_check("carries at least one figure or dated fact", has_figure, "high")
+
+    aeo_check("has a visible FAQ an engine can lift", len(h3s) >= 3, "medium",
+              f"{len(h3s)} question heading(s)")
+    aeo_check("heading levels do not skip", not (h3s and not h2s), "low")
+    aeo_check("cites sources in the body", len(external) >= 2, "high",
+              f"{len(external)} external link(s)")
+
+    aeo_failed = [c for c in aeo if not c["ok"]]
+    aeo_total = sum(weights[c["severity"]] for c in aeo)
+    aeo_earned = sum(weights[c["severity"]] for c in aeo if c["ok"])
+
     return {
+        "aeo": {
+            "score": round(aeo_earned / aeo_total * 100) if aeo_total else 0,
+            "passed": len(aeo) - len(aeo_failed),
+            "total_checks": len(aeo),
+            "must_fix": [c for c in aeo_failed if c["severity"] == "high"],
+            "should_fix": [c for c in aeo_failed if c["severity"] == "medium"],
+            "all_checks": aeo,
+            "what_this_is": (
+                "Answer Engine Optimisation - whether an assistant can lift a "
+                "correct, self-contained answer off this page and cite it. It is "
+                "structure, not keywords. A page can score well on SEO and badly "
+                "here."
+            ),
+        },
         "score": round(earned / total * 100) if total else 0,
         "passed": len(checks) - len(failed),
         "total_checks": len(checks),
