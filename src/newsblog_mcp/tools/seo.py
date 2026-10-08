@@ -477,7 +477,19 @@ def seo_audit(
     def aeo_check(name: str, ok: bool, severity: str, detail: str = "") -> None:
         aeo.append({"check": name, "ok": bool(ok), "severity": severity, "detail": detail})
 
+    # The byline the template renders sits above the first real paragraph, and
+    # taking paragraph zero read "By Staff Writer - 7 October 2026" as the
+    # article's opening answer and failed every well-written post at 7 words.
+    # Dropped by shape rather than by length: a short LEAD still has to fail
+    # this check, so a blanket "skip anything under 15 words" would hide the
+    # failure it exists to catch.
+    def _is_byline(par: str) -> bool:
+        head = par.strip().lower()
+        return head.startswith("by ") and len(par.split()) <= 12
+
     paras = [par for par in doc.paragraphs if len(par.split()) > 5]
+    while paras and _is_byline(paras[0]):
+        paras.pop(0)
 
     # A self-contained 40-60 word answer at the top is the single most cited
     # shape. Longer and it gets truncated; shorter and it is not an answer.

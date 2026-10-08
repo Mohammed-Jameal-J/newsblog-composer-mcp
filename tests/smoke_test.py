@@ -1762,6 +1762,22 @@ unreliable account of what it had done, the company confirmed on Monday this wee
           bad["aeo"]["score"] < out["aeo"]["score"], str(bad["aeo"]["score"]))
     check("the opening answer length is checked",
           any("40-60 word" in c["check"] and not c["ok"] for c in bad["aeo"]["all_checks"]))
+
+    # The rendered template puts a byline above the first real paragraph. Reading
+    # paragraph zero made every correctly-written post fail this check at seven
+    # words - "By Staff Writer - 7 October 2026".
+    bylined = ('<p>By Staff Writer &middot; 7 October 2026</p>'
+               '<p>' + ' '.join(['word'] * 48) + '</p>'
+               '<h2>What happened?</h2><p>Detail.</p>'
+               '<h3>a</h3><p>x</p><h3>b</h3><p>y</p><h3>c</h3><p>z</p>'
+               '<p>In 2026 it rose 12 percent. '
+               '<a href="https://france24.com/x" rel="noopener">France 24</a> '
+               '<a href="https://wsj.com/y" rel="noopener">WSJ</a></p>')
+    by = seo_audit(bylined, "astra", [], meta_title="t" * 40,
+                   meta_description="x" * 120, slug="a-b-c", headline="h", cfg=cfg)
+    check("the byline is not mistaken for the opening answer",
+          any("40-60 word" in c["check"] and c["ok"] for c in by["aeo"]["all_checks"]),
+          next(c["detail"] for c in by["aeo"]["all_checks"] if "40-60 word" in c["check"]))
     check("'click here' fails the anchor check",
           any("anchor text" in c["check"] and not c["ok"] for c in bad["all_checks"]))
     check("a missing internal link is flagged, not silently passed",
