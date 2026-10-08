@@ -510,6 +510,35 @@ def test_seo_keywords() -> None:
     check("the entity wins bare, without a junk modifier wrapped around it",
           claude["primary_keyword"] == "claude", claude["primary_keyword"])
 
+    # Found by running a real story through the installed build. The top entity
+    # on an AP-NORC poll piece was "Americans" - capitalised in every sentence,
+    # naming nobody - and two bugs compounded: str.rstrip takes a set of
+    # characters, not a suffix, so "Americans".rstrip("'s") returned "American",
+    # and the autocomplete expansion came back with "what is american express
+    # card" and "how does american psycho end". A demonym says who a story
+    # involves, never what it is about.
+    from newsblog_mcp.tools.seo import _strip_possessive
+    check("possessives are stripped as a suffix, not as characters",
+          _strip_possessive("OpenAI's") == "OpenAI"
+          and _strip_possessive("Americans") == "Americans",
+          _strip_possessive("OpenAI's") + " / " + _strip_possessive("Americans"))
+
+    poll = seo_keywords(
+        "Most Americans think artificial intelligence is developing too fast, "
+        "a new AP-NORC poll finds",
+        texts=["A new poll from The Associated Press-NORC Center for Public Affairs "
+               "Research finds that most Americans, 64%, think AI is developing too fast.",
+               "Worries around artificial intelligence cross party lines, with Americans "
+               "saying the government should keep AI under human control.",
+               "President Donald Trump has pushed back against slowing AI development "
+               "because of concerns about China.",
+               "There is bipartisan concern about the speed of artificial intelligence "
+               "development among Americans."],
+        include_suggestions=False, cfg=CONFIG)
+    check("a demonym never becomes the primary keyword",
+          poll["primary_keyword"] == "artificial intelligence",
+          poll["primary_keyword"])
+
     # No capitalised entity in the headline: the phrase ranking still decides.
     plain = seo_keywords(
         "Regulator opens inquiry into datacentre power use",
@@ -1785,6 +1814,62 @@ unreliable account of what it had done, the company confirmed on Monday this wee
               for c in bad["all_checks"]))
 
 
+def test_primary_source_detection() -> None:
+    print("\n[verify] what counts as the company's own announcement")
+    from newsblog_mcp.tools.verify import _is_primary
+    from newsblog_mcp.providers.search import SearchHit
+
+    def hit(url, publisher):
+        return SearchHit(title="", url=url, publisher=publisher, published_date="",
+                         snippet="", provider="google_rss")
+
+    headline = "Google releases a new local-first Granola competitor"
+
+    # The bug this guards. A Google News redirect carries google.com, so reading
+    # the brand off the URL made a single TechCrunch article score as "the
+    # primary/official source (google.com) reporting its own news" at high
+    # confidence - defeating the two-independent-publishers rule for any
+    # headline that happens to name a large company.
+    check("an aggregator redirect is not the outlet that wrote the story",
+          not _is_primary(hit("https://news.google.com/rss/articles/CBMiabc",
+                              "TechCrunch"), headline))
+    check("the named outlet is what an aggregator link is judged on",
+          _is_primary(hit("https://news.google.com/rss/articles/CBMixyz",
+                          "Reuters"), "Reuters reports on chip exports"))
+    # blog.google is Google's own newsroom, and its first label is "blog".
+    check("every domain label is checked, not just the first",
+          _is_primary(hit("https://blog.google/products/x", "Google"), headline))
+    check("a direct company newsroom still counts",
+          _is_primary(hit("https://nvidia.com/newsroom/x", "Nvidia"),
+                      "Nvidia unveils a new GPU"))
+    check("an unrelated outlet is never primary",
+          not _is_primary(hit("https://theverge.com/a", "The Verge"), headline))
+
+
+def test_fact_dedupe_and_figure_labels() -> None:
+    print("\n[facts] syndicated copy, and labels that start mid-word")
+    from newsblog_mcp.tools.facts import _fact_key, _extract_figures
+
+    # Two outlets running identical wire copy are one fact, not two.
+    a = "Most Americans, 64%, think AI is developing too fast."
+    b = "Most Americans, 64%, think AI is developing \u201ctoo fast\u201d."
+    check("the same wire sentence keys the same whatever the punctuation",
+          _fact_key(a) == _fact_key(b), f"{_fact_key(a)!r} vs {_fact_key(b)!r}")
+    check("genuinely different sentences keep different keys",
+          _fact_key(a) != _fact_key("Only 8% say it is moving too slow."))
+
+    # A flat [-70:] slice produced "ss-NORC Center ..." where the source said
+    # "AP-NORC". A label that begins mid-word reads as an error in the source.
+    long_run = ("The survey was conducted by the Associated Press-NORC Center for "
+                "Public Affairs Research and it finds that most Americans, 64% of "
+                "them, think artificial intelligence is developing too fast today.")
+    labels = [f["label"] for f in _extract_figures(long_run)]
+    check("a figure label never starts mid-word",
+          all(not lab or long_run.split(lab.split(" ")[0])[0][-1:] in ("", " ")
+              for lab in labels),
+          str(labels[:2]))
+
+
 if __name__ == "__main__":
     test_schema_valid()
     test_schema_catches_mismatch()
@@ -1806,6 +1891,8 @@ if __name__ == "__main__":
     test_derived_image_concept()
     test_install_paths()
     test_internal_links()
+    test_primary_source_detection()
+    test_fact_dedupe_and_figure_labels()
     test_aeo_audit()
     test_seo_audit()
     test_schema_seo_fields()

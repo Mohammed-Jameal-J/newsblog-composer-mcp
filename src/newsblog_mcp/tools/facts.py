@@ -33,6 +33,15 @@ _FIGURE_RE = re.compile(
 _PROPER_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
 
 
+def _fact_key(sentence: str) -> str:
+    """Identity of a fact, ignoring punctuation and case.
+
+    Two outlets running the same wire copy differ by a curly quote or a dateline
+    prefix, not by content.
+    """
+    return re.sub(r"[^a-z0-9 ]", "", (sentence or "").lower()).strip()
+
+
 def _looks_like_fact(sentence: str) -> bool:
     if not (45 <= len(sentence) <= 320):
         return False
@@ -72,7 +81,14 @@ def _extract_figures(text: str) -> list[dict]:
         seen.add(value.lower())
         start = max(0, match.start() - 70)
         label = normalize(text[start:match.start()]).split(". ")[-1]
-        out.append({"label": label[-70:], "value": value})
+        # Cut to the last whole word. A flat [-70:] slice produced labels like
+        # "ss-NORC Center for Public Affairs Research finds that most Americans,"
+        # where the source said "AP-NORC" - a figure whose label starts mid-word
+        # reads as a typo in the source rather than a crop.
+        if len(label) > 70:
+            label = label[-70:]
+            label = label.split(" ", 1)[1] if " " in label else label
+        out.append({"label": label.strip(), "value": value})
     return out
 
 
@@ -89,6 +105,7 @@ def fetch_article_facts(
                 "quotes": [], "figures": [], "per_url": []}
 
     facts: list[dict] = []
+    seen_facts: dict[str, dict] = {}
     quotes: list[dict] = []
     figures: list[dict] = []
     per_url: list[dict] = []
@@ -132,7 +149,21 @@ def fetch_article_facts(
             for sentence in sentences(text):
                 sentence = normalize(sentence)
                 if _looks_like_fact(sentence):
-                    facts.append({"text": sentence, "source_url": url, "publisher": publisher})
+                    # Syndication means two outlets often carry identical wire
+                    # text. Listing it twice inflated fact_count - 24 facts that
+                    # were really 12 - and invited the writer to treat one wire
+                    # report as two independent confirmations. The duplicate is
+                    # recorded as another publisher on the SAME fact instead.
+                    key = _fact_key(sentence)
+                    if key in seen_facts:
+                        other = seen_facts[key]
+                        if publisher not in other["also_reported_by"]:
+                            other["also_reported_by"].append(publisher)
+                        continue
+                    entry = {"text": sentence, "source_url": url,
+                             "publisher": publisher, "also_reported_by": []}
+                    seen_facts[key] = entry
+                    facts.append(entry)
                     picked += 1
                     if picked >= max_facts_per_url:
                         break

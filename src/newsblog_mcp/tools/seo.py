@@ -89,6 +89,22 @@ _SEGMENT_RE = re.compile(r"[.,;:!?()\[\]{}\"\u201c\u201d\u2018\u2019\u2026/|]+|\
 _WORD_RE = re.compile(r"[a-z0-9][a-z0-9'\-]*")
 # No dot inside the pattern: allowing one made "DSP. Qualcomm" match as a single
 # entity across a sentence boundary. Entities are extracted per sentence too.
+# Capitalised in every news story, the subject of none of them. A demonym or a
+# party name describes who a story involves, not what it is about.
+_GENERIC_ENTITIES = {
+    "american", "americans", "british", "britons", "european", "europeans",
+    "indian", "indians", "chinese", "russian", "russians", "australian",
+    "australians", "canadian", "canadians", "republican", "republicans",
+    "democrat", "democrats", "congress", "senate", "parliament",
+    "washington", "whitehouse", "white house",
+}
+
+
+def _strip_possessive(name: str) -> str:
+    """\"OpenAI's\" -> \"OpenAI\". A suffix strip, not a character strip."""
+    return re.sub(r"['\u2019]s$", "", name or "").strip()
+
+
 _WEAK_ANCHORS = {
     "click here", "here", "read more", "more", "this", "this post", "link",
     "this article", "see more", "learn more", "find out more", "read this",
@@ -190,8 +206,16 @@ def seo_keywords(
 
     # The entities the HEADLINE names. An entity buried in paragraph nine is not
     # what the piece is about; one in the title is.
+    #
+    # Generic groups are excluded. On an AP-NORC poll story the top entity was
+    # "Americans", which is capitalised in every sentence and names nobody: the
+    # autocomplete expansion came back with "what is american express card" and
+    # "how does american psycho end". A demonym or a party name is a word the
+    # story is ABOUT people of, never the subject itself.
     titled_entities = [name for name, _ in entities.most_common()
-                       if tokens(name) & title_tokens]
+                       if tokens(name) & title_tokens
+                       and _strip_possessive(name).lower() not in _GENERIC_ENTITIES
+                       and len(name.split()) <= 3]
 
     # Prefer a multi-word phrase, but only one that is actually carrying the
     # article. Taking any multi-word phrase over a much stronger single word
@@ -218,7 +242,10 @@ def seo_keywords(
     # The entity on its own is what people search for and what an answer engine
     # matches the page to.
     if titled_entities:
-        primary = titled_entities[0].lower().rstrip("'s").rstrip("'")
+        # str.rstrip takes a SET OF CHARACTERS, not a suffix. The first version
+        # used .rstrip("'s") to turn "OpenAI's" into "OpenAI" and turned
+        # "Americans" into "American" on the way past.
+        primary = _strip_possessive(titled_entities[0]).lower()
 
     secondary = _dedupe_phrases([p for p in ranked if p != primary], 10)
 

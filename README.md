@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-310%20passing-brightgreen)](tests/smoke_test.py)
+[![Tests](https://img.shields.io/badge/tests-320%20passing-brightgreen)](tests/smoke_test.py)
 
 </div>
 

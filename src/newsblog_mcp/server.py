@@ -669,19 +669,29 @@ def seo_audit(html_body: str, primary_keyword: str,
               secondary_keywords: list[str] | None = None, meta_title: str = "",
               meta_description: str = "", slug: str = "",
               headline: str = "") -> dict:
-    """Step 10. Score the finished body against on-page SEO rules before publishing.
+    """Step 10. Score the finished body. Returns TWO scores, SEO and AEO.
 
-    Checks H1 uniqueness and keyword placement, keyword density, H2 structure,
-    word count, meta title and description lengths, slug shape, image alt text,
-    and external source links. Returns a score plus must_fix / should_fix /
-    nice_to_have lists.
+    `score` is on-page SEO: H1 and keyword placement, keyword density, H2
+    structure, word count, meta title and description lengths, slug shape, image
+    alt text, and links - external and internal counted separately, with anchor
+    text checked.
+
+    `aeo` is Answer Engine Optimisation, scored on its own under that key:
+    whether an assistant can lift a correct, self-contained answer off the page
+    and cite it. It checks the 40-60 word opening answer, question-shaped H2s,
+    paragraph length, at least one figure or dated fact, a visible FAQ, heading
+    order, and sources in the body. Structure, not keywords - a page can score
+    well on SEO and badly here, and the gap is the point.
+
+    Both carry must_fix / should_fix lists. Show the user both numbers;
+    save_and_present puts them on separate rows of the Checks table.
 
     Pass `headline` when the body has no H1 because the blog platform renders the
     title itself - the H1 checks then run against that headline instead of
     failing a correctly-built post.
 
-    Fix everything in must_fix and call again. On-page structure only - it says
-    nothing about search volume, competition or backlinks.
+    Fix everything in must_fix and call again. On-page structure only: it says
+    nothing about search volume, competition, or links from other sites.
     """
     return _seo_audit(html_body, primary_keyword,
                       secondary_keywords=secondary_keywords, meta_title=meta_title,

@@ -50,16 +50,31 @@ def _is_primary(hit: SearchHit, title: str) -> bool:
     parsed = urlparse(hit.url)
     host = (parsed.hostname or "").lower()
     path = (parsed.path or "").lower()
+    # An aggregator redirect carries the AGGREGATOR's domain, never the outlet's.
+    # Reading the brand off it meant every headline containing the word "Google"
+    # that arrived through a Google News link was scored as Google announcing its
+    # own news: one TechCrunch article came back as "primary/official source
+    # (google.com) reporting its own news", high confidence, from a single
+    # publisher. _publisher_key already knew aggregator domains prove nothing
+    # about the outlet; this function did not ask.
+    domain = registrable_domain(hit.url)
+    if domain in _AGGREGATORS:
+        named = re.sub(r"[^a-z0-9]", "", (hit.publisher or "").lower())
+        return bool(named) and len(named) > 3 and named in tokens(title)
+
     if any(host.endswith(t) for t in _PRIMARY_TLDS):
         return True
     if any(host.startswith(s) for s in _PRIMARY_SUBDOMAINS) and any(
         p in path for p in _PRIMARY_PATH_HINTS
     ):
         return True
-    # A company reporting its own news: the registrable domain's brand word
-    # appears in the headline itself (e.g. nvidia.com for an Nvidia headline).
-    brand = registrable_domain(hit.url).split(".")[0]
-    return bool(brand) and len(brand) > 3 and brand in tokens(title)
+    # A company reporting its own news: a label of the registrable domain appears
+    # in the headline itself (nvidia.com for an Nvidia headline). Every label is
+    # checked, not just the first: Google's own newsroom is blog.google, whose
+    # first label is "blog", so taking [0] missed the clearest primary source
+    # there is.
+    words = tokens(title)
+    return any(len(part) > 3 and part in words for part in domain.split("."))
 
 
 def _publisher_key(hit: SearchHit) -> str:
