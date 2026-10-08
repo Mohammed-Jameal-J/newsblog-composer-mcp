@@ -51,6 +51,20 @@ not decide for you.
 unless the SEO audit and the AI-word check have both run, so the finished post
 always arrives with its scores attached.
 
+**Two scores, not one: SEO and AEO.** `seo_audit` returns both. SEO is the
+on-page pass. AEO — Answer Engine Optimisation — is whether an assistant can lift
+a correct, self-contained answer off the page and cite it: a 40-60 word opening
+answer, question-shaped headings, short paragraphs, a figure with a source, a
+visible FAQ. It is structure, not keywords, and a page can score well on one and
+badly on the other. Both appear on the Checks table.
+
+**It links to your own earlier posts, and only where that is justified.** Every
+post is recorded in an index beside your profile, and `suggest_internal_links`
+matches a new draft against it on shared entities and keyword overlap. Below the
+relevance floor it returns nothing, because an irrelevant internal link is worse
+than no link. These are internal links, not backlinks: a backlink lives on
+somebody else's site, and no tool can create one.
+
 **The prose is machine-written and the tool says so.** Without a detector API key
 `score_ai_text` reports `Not measured` rather than inventing a reassuring number
 — a local style score measures cliche density and sentence rhythm, which is not a
@@ -503,10 +517,13 @@ publishable.
   `sources` before trusting a `medium` confidence. The RSS backups are
   unofficial endpoints that can change shape without warning; `diagnose` tells
   you when one has stopped working.
-- **The SEO tools cover on-page only.** Keyword relevance, structure, meta
-  lengths, alt text, internal consistency. They say nothing about search volume,
-  competition, or backlinks — that needs a paid keyword API, and no free tier
-  gives real volume data.
+- **The SEO and AEO tools cover on-page only.** Keyword relevance, structure,
+  meta lengths, alt text, answer shape, and links in both directions. They say
+  nothing about search volume, competition, or links other sites point at you —
+  volume needs a paid keyword API, and links from other sites are earned, not
+  generated.
+- **Internal links need a back catalogue.** The index starts empty and fills as
+  you publish, so the first post suggests nothing. That is correct, not broken.
 - **Generated images are local files.** Upload the file and pass a public https
   URL into `build_schema`, or `NewsArticle.image` will point at a path no crawler
   can reach.
@@ -518,7 +535,7 @@ publishable.
 
 ```
 src/newsblog_mcp/
-  server.py         MCP entrypoint: 19 tools, 2 resources
+  server.py         MCP entrypoint: 20 tools, 2 resources
   diagnose.py       standalone connectivity check
   config.py         env loading, capability report
   paths.py          decides where this install writes, and why
@@ -530,6 +547,7 @@ src/newsblog_mcp/
     detector.py     GPTZero / Sapling
     imagegen.py     OpenAI / Stability / Cloudflare / Pollinations + trademark filter
   tools/            one module per MCP tool
+    links.py        the post index and internal-link matcher
   templates/        article.html.j2
   resources/        house_style.md, humanizer_patterns.md
 tests/smoke_test.py offline test suite
