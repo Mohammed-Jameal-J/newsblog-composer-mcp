@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-320%20passing-brightgreen)](tests/smoke_test.py)
+[![Tests](https://img.shields.io/badge/tests-352%20passing-brightgreen)](tests/smoke_test.py)
 
 </div>
 
@@ -452,10 +452,19 @@ a $5 monthly credit covers roughly 1,000 requests, and you are billed past that.
 
 Free options that still hold up, best first:
 
-- **GDELT** — no key, no signup, no limit to speak of. Already the default.
-  It is a global news index, so it is genuinely good at "is anyone reporting
-  this", which is exactly what `verify_news` asks. Start here and only add a key
-  if snippet quality or freshness becomes a problem.
+- **Publisher feeds** — no key, no signup, no quota, and on by default. The
+  server reads about fifty technology, AI and security publishers' own RSS
+  feeds directly. This matters more than it sounds: every other keyless source
+  hands back a `news.google.com` redirect wrapping an opaque identifier, so the
+  story can be counted but the article cannot be opened. Measured on a live run
+  with no key, the aggregators found 29 stories and exactly one had a URL the
+  server could fetch. A feed's `<link>` is the article itself. The limit is
+  coverage rather than access: a story none of the listed outlets ran is a story
+  this provider cannot see, and the others answer instead.
+- **GDELT** — no key, no signup, no limit to speak of. A global news index, so
+  it is genuinely good at "is anyone reporting this", which is exactly what
+  `verify_news` asks. It is free and shared, so it rate-limits; the server backs
+  off for two minutes when it does rather than retrying into the same refusal.
 - **Tavily** — 1,000 credits/month, renews monthly, no card. The best keyed
   option for this pipeline. Set `TAVILY_API_KEY`.
 - **Google Custom Search** — 100 queries/day, no card. Needs both

@@ -98,13 +98,14 @@ def draft_brief(
         "structure": [
             "Two intro paragraphs. First says what happened. Second says why it "
             "matters, without editorialising.",
-            "TWO or THREE sections, each with a statement heading and TWO to FOUR "
+            "TWO or THREE sections. Phrase each heading as the question a reader would type, not as a label - that is what the AEO check scores. TWO to FOUR "
             "paragraphs. Four is the hard ceiling: past that the section carries "
             "two ideas and wants splitting, and the reader sees a wall. Vary the "
             "count between sections rather than making every one the same length.",
             "Four to eight FAQ questions, each answerable from the facts below.",
             "A closing call to action of two or three sentences.",
             "References as a numbered list of the real URLs below.",
+            "The finished body, FAQ included, must reach 1000 words. A draft that stops at 900 fails the audit and has to be reopened.",
         ],
         "facts_by_source": by_source,
         "facts_with_numbers": numeric,
@@ -141,7 +142,7 @@ def draft_brief(
         "write_this_now": (
             "You are the writer. Compose the full article to the structure above, "
             "in the configured voice, and pass it to build_schema as `article` with "
-            "`intro` (exactly two paragraphs), `sections` (exactly two) and `cta`. "
+            "`intro` (exactly two paragraphs), `sections` (two or three) and `cta`. "
             "Do not return this brief to the user as a worksheet and do not ask them "
             "to write it; they asked for a post."),
         "next_step": ("Write the body, then run find_ai_words until it is clean and "

@@ -27,6 +27,62 @@ _PRIMARY_TLDS = (".gov", ".gov.uk", ".europa.eu", ".int", ".mil")
 _AGGREGATORS = {"google.com", "bing.com", "msn.com", "yahoo.com", "flipboard.com",
                 "news.com", "smartnews.com"}
 
+# Platforms where the "article" is somebody resharing a link. A LinkedIn post
+# about a BleepingComputer story is not a second publisher confirming it - it is
+# the same single report, forwarded. Counting these defeats the entire point of
+# requiring two independent publishers, and on a live check they made one report
+# look like ten. They are also useless as references: a citation pointing at an
+# Instagram post tells a reader nothing and tells a crawler less.
+_SOCIAL = {
+    "instagram.com", "facebook.com", "threads.com", "threads.net",
+    "x.com", "twitter.com", "linkedin.com", "reddit.com", "tiktok.com",
+    "youtube.com", "pinterest.com", "tumblr.com", "vk.com", "t.me",
+    "telegram.me", "bsky.app", "mastodon.social", "quora.com",
+    "ycombinator.com", "news.ycombinator.com",
+}
+
+
+# A wire dateline. "WASHINGTON (AP) -" at the top of a story means one
+# newsroom wrote it and everyone else reprinted it. Eight local sites carrying
+# the same AP copy is one source, not eight, and counting them separately is the
+# same failure as counting a Google redirect or a LinkedIn repost.
+#
+# Only the parenthesised dateline form is matched, deliberately. Searching for
+# "Associated Press" anywhere in the text would flag an outlet's own reporting
+# ABOUT an AP-NORC poll, which is original work that happens to name the
+# pollster. The dateline is the syndication marker; the name is not.
+_WIRE_DATELINE = re.compile(
+    r"\(\s*(AP|Reuters|AFP|AFPRelaxnews|PA Media|dpa|PTI|IANS|ANI|Xinhua|"
+    r"Bloomberg|Kyodo|Jiji|EFE|ANSA)\s*\)")
+
+
+def _wire_service(hit: SearchHit) -> str:
+    """The wire that wrote this, or "" if the outlet wrote it themselves."""
+    match = _WIRE_DATELINE.search(f"{hit.title or ''} {hit.snippet or ''}")
+    return match.group(1).upper() if match else ""
+
+
+def _is_social(hit: SearchHit) -> bool:
+    return registrable_domain(hit.url) in _SOCIAL
+
+
+def _brand(text: str) -> str:
+    """Reduce an outlet name or a domain to one comparable token.
+
+    Needed because the same outlet arrives in two shapes: a fetchable hit keys
+    on its domain while a redirect keys on the feed's publisher name. Without
+    this, "the420.in" and "The420.in" were counted as two independent outlets,
+    inflating corroboration with a copy of itself.
+    """
+    text = (text or "").strip().lower()
+    if not text:
+        return ""
+    if "." in text and " " not in text:
+        domain = registrable_domain(text if "//" in text else "http://" + text)
+        if domain:
+            text = domain.split(".")[0]
+    return re.sub(r"[^a-z0-9]", "", text)
+
 
 def _parse_date(value: str):
     if not value:
@@ -86,14 +142,20 @@ def _publisher_key(hit: SearchHit) -> str:
     is the real identity. Both forms reduce to a bare brand token so that
     "reuters.com" and "Reuters" count as one publisher, not two.
     """
-    name = re.sub(r"[^a-z0-9]", "", (hit.publisher or "").lower())
+    wire = _wire_service(hit)
+    if wire:
+        # Every reprint of the same wire story collapses onto the wire itself.
+        return f"wire:{wire.lower()}"
     domain = registrable_domain(hit.url)
     if not hit.fetchable or domain in _AGGREGATORS:
-        return name or "unknown"
-    return (domain.split(".")[0].lower() if domain else "") or name or "unknown"
+        return _brand(hit.publisher) or "unknown"
+    return _brand(domain) or _brand(hit.publisher) or "unknown"
 
 
 def _publisher_label(hit: SearchHit) -> str:
+    wire = _wire_service(hit)
+    if wire:
+        return f"{wire} (wire copy)"
     domain = registrable_domain(hit.url)
     if not hit.fetchable or domain in _AGGREGATORS:
         return hit.publisher or "unknown"
@@ -167,9 +229,15 @@ def verify_news(title: str, cfg: Config | None = None, limit: int = 10,
 
     hits = _dedupe(raw_hits)
     relevant, rejected = [], []
+    social_reposts = 0
     for hit in hits:
         if _publisher_key(hit) == "unknown":
             continue  # an aggregator link with no named outlet proves nothing
+        if _is_social(hit):
+            # Excluded before scoring, so it can never reach the publisher
+            # count, the reference list or fetchable_urls.
+            social_reposts += 1
+            continue
         score = max(overlap(title, hit.title), overlap(title, hit.snippet))
         if score >= RELEVANCE_THRESHOLD:
             relevant.append((score, hit))
@@ -256,6 +324,9 @@ def verify_news(title: str, cfg: Config | None = None, limit: int = 10,
             for _, h in relevant if h.fetchable
         ][:10],
         "independent_publishers": publisher_labels,
+        "social_reposts_ignored": social_reposts,
+        "wire_services_detected": sorted({_wire_service(h) for _, h in relevant
+                                          if _wire_service(h)}),
         "syndication": syndication,
         "provider_log": provider_log,
     }

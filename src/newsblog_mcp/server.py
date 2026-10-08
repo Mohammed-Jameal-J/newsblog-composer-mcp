@@ -219,15 +219,32 @@ def reset_profile() -> dict:
 
 
 @mcp.tool()
-def capabilities() -> dict:
+def capabilities(probe: bool = False, check_feeds: bool = False) -> dict:
     """Report which providers are configured and which keyless fallbacks are in use.
 
     Call this first when something behaves unexpectedly - it shows whether
     verify_news has a real search key, whether humanize_text can rewrite
     server-side, and whether score_ai_text is using a real detector or the local
     heuristic.
+
+    By default this reads configuration only, so a key that is present but dead
+    still reads as true. Pass `probe=True` to actually call each keyed provider
+    once and find out - that is the difference between "a key is set" and "a key
+    works", and it is worth the few seconds whenever searches come back empty.
+
+    Pass `check_feeds=True` to fetch every bundled publisher feed and report
+    which ones answered. Publishers move their feeds without notice, so this is
+    how a dead entry gets found before it silently narrows the keyless path.
+    Both are off by default because both make network calls.
     """
-    return _cfg().capability_report()
+    report = _cfg().capability_report()
+    if probe:
+        from .providers.search import probe_keys
+        report["search_probe"] = probe_keys(_cfg())
+    if check_feeds:
+        from .providers.feeds import feed_health
+        report["publisher_feeds"] = feed_health(_cfg())
+    return report
 
 
 @mcp.tool()

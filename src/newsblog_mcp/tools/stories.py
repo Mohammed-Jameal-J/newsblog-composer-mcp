@@ -49,6 +49,46 @@ def _representative(cluster: list[SearchHit]) -> str:
     return best.title
 
 
+# Headline shapes that are announcements rather than news. Searching a category
+# word like "cybersecurity" surfaced "Cybersecurity Awareness Month" and a
+# webinar notice as the two best stories available, because both were fresh and
+# carried by several sites. They are fresh and corroborated and still worthless
+# to write about, so they sort last instead of first.
+_PROMO_PHRASES = (
+    "awareness month", "awareness week", "webinar", "of the year",
+    "solution of the year", "breakthrough award", "named", "names",
+    "wins", "winner", "award", "awards", "recognised", "recognized",
+    "announces", "announcement", "launches", "unveils", "introduces",
+    "partners with", "joins forces", "collaboration with", "appoints",
+    "appointment", "to speak at", "to present at", "keynote", "conference",
+    "white paper", "whitepaper", "report finds", "survey finds",
+    "now available", "general availability", "chooses", "selects",
+)
+
+# Wire services that exist to distribute company announcements. A press release
+# carried by four of these is one company talking, not four newsrooms.
+_WIRE_PUBLISHERS = (
+    "prnewswire", "businesswire", "globenewswire", "accesswire", "einpresswire",
+    "newswire", "yahoo finance", "morningstar", "marketscreener", "stocktitan",
+)
+
+
+def _promo_penalty(story: dict) -> int:
+    """0 for news, higher for marketing. Used only to sort, never to hide."""
+    headline = (story.get("headline") or "").lower()
+    titles = " ".join(story.get("sample_titles") or []).lower()
+    publishers = " ".join(story.get("publishers") or []).lower()
+
+    penalty = 0
+    if any(phrase in headline for phrase in _PROMO_PHRASES):
+        penalty += 2
+    elif any(phrase in titles for phrase in _PROMO_PHRASES):
+        penalty += 1
+    if any(wire in publishers for wire in _WIRE_PUBLISHERS):
+        penalty += 2
+    return penalty
+
+
 def find_stories(
     topic: str,
     days: int = 2,
@@ -97,9 +137,11 @@ def find_stories(
             "sample_titles": [h.title for h in cluster[:4]],
         })
 
-    # Corroboration first, then freshness. A story two publishers carried an hour
-    # ago beats one publisher shouting yesterday.
-    stories.sort(key=lambda s: (s["publisher_count"],
+    # Corroboration first, then freshness, but marketing goes to the back.
+    # A story two publishers carried an hour ago beats one publisher shouting
+    # yesterday - and neither beats an actual event.
+    stories.sort(key=lambda s: (-_promo_penalty(s),
+                                s["publisher_count"],
                                 -(s["age_hours"] if s["age_hours"] is not None else 9999)),
                  reverse=True)
 

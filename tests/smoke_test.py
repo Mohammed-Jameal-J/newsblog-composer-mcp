@@ -245,6 +245,199 @@ def test_trademark_filter() -> None:
     check("terms reported", {"nvidia", "iphone", "chatgpt"} <= set(removed), str(removed))
 
 
+def test_social_reposts_are_not_publishers() -> None:
+    """A reshared link is not a second outlet confirming the story.
+
+    Found on a live run: one BleepingComputer report about the Advantest breach
+    came back as "10 independent publishers" because Instagram, LinkedIn,
+    Reddit and Threads posts linking to it were each counted as a publisher,
+    and the420.in was counted twice - once by domain, once by feed name.
+    Corroboration counting is the whole product, so both shapes are pinned.
+    """
+    print("\n[verify_news] reshares and case variants must not inflate the count")
+    from newsblog_mcp.providers.search import SearchHit
+    from newsblog_mcp.tools import verify as verify_mod
+
+    title = "Advantest confirms personal information stolen in ransomware attack"
+
+    def hit(url, publisher, fetchable=True):
+        return SearchHit(title=title, url=url, publisher=publisher,
+                         published_date="2026-10-07T12:00:00+00:00",
+                         snippet=title, provider="tavily", fetchable=fetchable)
+
+    hits = [
+        hit("https://www.bleepingcomputer.com/news/security/advantest-x", "bleepingcomputer.com"),
+        hit("https://www.securityweek.com/advantest-y", "securityweek.com"),
+        # The same outlet twice: once as a fetchable domain, once as a feed name
+        # behind a Google redirect. One publisher, not two.
+        hit("https://the420.in/advantest-z", "the420.in"),
+        hit("https://news.google.com/rss/articles/CBMiAAA", "The420.in", fetchable=False),
+        # Reshares. Each links to the same single BleepingComputer report.
+        hit("https://www.instagram.com/p/DeMKKF4m4_Q", "instagram.com"),
+        hit("https://www.linkedin.com/posts/someone-advantest-activity-751", "linkedin.com"),
+        hit("https://www.reddit.com/r/SecOpsDaily/comments/1wztnay/advantest", "reddit.com"),
+        hit("https://www.threads.com/@hub/post/DeMKOojm_ea/advantest", "threads.com"),
+    ]
+
+    monkey = verify_mod.gather
+    verify_mod.gather = lambda *a, **k: (hits, [{"provider": "tavily", "ok": True}])
+    try:
+        out = verify_mod.verify_news(title, days=7)
+    finally:
+        verify_mod.gather = monkey
+
+    publishers = out["independent_publishers"]
+    refs = " ".join(r["url"] for r in out["reference_candidates"])
+    urls = " ".join(out["fetchable_urls"])
+
+    check("three real publishers, not ten", len(publishers) == 3, str(publishers))
+    check("the420 counted once", sum("420" in p for p in publishers) == 1, str(publishers))
+    check("no social platform in publishers",
+          not any(k in " ".join(publishers) for k in
+                  ("instagram", "linkedin", "reddit", "threads")), str(publishers))
+    check("no social platform cited as a reference",
+          not any(k in refs for k in ("instagram", "linkedin", "reddit", "threads")), refs)
+    check("no social platform offered to the fetcher",
+          not any(k in urls for k in ("instagram", "linkedin", "reddit", "threads")), urls)
+    check("reshares reported, not hidden", out["social_reposts_ignored"] == 4,
+          str(out["social_reposts_ignored"]))
+    check("story still verifies", out["is_legit"] is True, str(out["is_legit"]))
+
+
+def test_suggestions_and_slug_hygiene() -> None:
+    """The keyword tool must not fail the audit that lives next door to it."""
+    print("\n[seo_keywords] titles that fit, slugs that pass, FAQs about the story")
+    from newsblog_mcp.tools.seo import (_fit, _short_slug, _is_company_profile_query,
+                                        _story_word)
+
+    headline = "Advantest confirms personal information stolen in ransomware attack"
+
+    # A meta title ending in "..." spends three characters saying it was cut.
+    fitted = _fit(headline, 60)
+    check("meta title fits", len(fitted) <= 60, f"{len(fitted)} chars: {fitted}")
+    check("meta title carries no ellipsis", "..." not in fitted, fitted)
+    check("meta title ends on a whole word", not fitted.endswith(("-", ",", " ")), fitted)
+    check("a short title is left alone", _fit("Short one", 60) == "Short one")
+
+    # The audit demands 3-8 words. slugify kept all nine.
+    slug = _short_slug(headline, "advantest")
+    words = slug.split("-")
+    check("slug is 3-8 words", 3 <= len(words) <= 8, f"{len(words)}: {slug}")
+    check("slug keeps the brand", "advantest" in words, slug)
+    check("slug drops stopwords", "in" not in words and "confirms" not in words, slug)
+
+    # Autocomplete on a company name returns investor questions.
+    check("investor queries are filtered",
+          all(_is_company_profile_query(q) for q in
+              ["advantest share price", "is advantest a good stock to buy",
+               "how many employees does advantest have", "who owns advantest"]))
+    check("story questions survive the filter",
+          not any(_is_company_profile_query(q) for q in
+                  ["what data was stolen from advantest",
+                   "when did the advantest breach happen"]))
+    check("the story word seeds the second query",
+          _story_word(headline, "advantest") == "ransomware",
+          _story_word(headline, "advantest"))
+
+
+def test_announcements_sort_below_news() -> None:
+    """Fresh and corroborated is not the same as worth writing about."""
+    print("\n[find_stories] marketing sorts last, it does not sort first")
+    from newsblog_mcp.tools.stories import _promo_penalty
+
+    # Both of these were offered as the best available cybersecurity stories.
+    awareness = {"headline": "Cybersecurity Awareness Month 2026",
+                 "sample_titles": ["Cybersecurity Awareness Month 2026"],
+                 "publishers": ["Cal OES News", "Clark Hill"]}
+    award = {"headline": "Zip Security Named 2026 SMB CyberSecurity Solution of the Year",
+             "sample_titles": ["Zip Security Named 2026 SMB Solution of the Year"],
+             "publishers": ["Morningstar"]}
+    breach = {"headline": "Advantest confirms personal information stolen in ransomware attack",
+              "sample_titles": ["Advantest confirms personal information stolen"],
+              "publishers": ["BleepingComputer", "SecurityWeek"]}
+
+    check("awareness month is penalised", _promo_penalty(awareness) > 0,
+          str(_promo_penalty(awareness)))
+    check("an award release is penalised", _promo_penalty(award) > 0,
+          str(_promo_penalty(award)))
+    check("a wire publisher adds to the penalty",
+          _promo_penalty(award) >= 2, str(_promo_penalty(award)))
+    check("real news is not penalised", _promo_penalty(breach) == 0,
+          str(_promo_penalty(breach)))
+    check("news outranks marketing",
+          _promo_penalty(breach) < min(_promo_penalty(awareness), _promo_penalty(award)))
+
+
+def test_wire_copy_is_one_publisher() -> None:
+    """Eight local sites running the same AP story are one source.
+
+    From a live run: an AP-NORC poll came back as "8 independent publishers"
+    because every local paper that reprinted the wire copy was counted on its
+    own, and the syndication check missed it - it compares headline wording, and
+    the wording differs slightly while the body is identical. The dateline does
+    not differ.
+    """
+    print("\n[verify_news] wire reprints collapse onto the wire")
+    from newsblog_mcp.providers.search import SearchHit
+    from newsblog_mcp.tools import verify as verify_mod
+
+    title = "Most Americans think artificial intelligence is developing too fast"
+
+    def hit(url, publisher, snippet):
+        return SearchHit(title=title, url=url, publisher=publisher,
+                         published_date="2026-10-08T10:20:00+00:00",
+                         snippet=snippet, provider="tavily", fetchable=True)
+
+    wire = "WASHINGTON (AP) - A new AP-NORC poll finds most Americans think AI is developing too fast."
+    hits = [
+        hit("https://www.ktvo.com/news/a", "ktvo.com", wire),
+        hit("https://www.wktv.com/news/b", "wktv.com", wire),
+        hit("https://www.voiceofalexandria.com/news/c", "voiceofalexandria.com", wire),
+        hit("https://www.thespec.com/business/d", "thespec.com", wire),
+        hit("https://apnews.com/article/e", "apnews.com", wire),
+        # Original reporting that merely names the pollster must NOT collapse.
+        hit("https://www.theverge.com/f", "theverge.com",
+            "A new poll from The Associated Press-NORC Center for Public Affairs "
+            "Research finds that most Americans, 64%, think AI is developing too fast."),
+    ]
+
+    monkey = verify_mod.gather
+    verify_mod.gather = lambda *a, **k: (hits, [{"provider": "tavily", "ok": True}])
+    try:
+        out = verify_mod.verify_news(title, days=7)
+    finally:
+        verify_mod.gather = monkey
+
+    publishers = out["independent_publishers"]
+    check("five wire reprints count once", len(publishers) == 2, str(publishers))
+    check("the wire is named as the source",
+          any("AP" in p and "wire" in p for p in publishers), str(publishers))
+    check("original reporting survives",
+          any("verge" in p for p in publishers), str(publishers))
+    check("the wire is reported", out["wire_services_detected"] == ["AP"],
+          str(out["wire_services_detected"]))
+    check("naming the pollster is not a dateline",
+          not verify_mod._wire_service(hits[-1]), verify_mod._wire_service(hits[-1]))
+
+
+def test_quote_fragments_are_dropped() -> None:
+    """A fragment handed over as a quote is an invitation to print it."""
+    print("\n[fetch_article_facts] section labels and fragments are not quotes")
+    from newsblog_mcp.tools.facts import _is_quotable
+
+    # All three came back from a real Axios article.
+    check("an em-dash fragment is rejected",
+          not _is_quotable("- even as the White House continues using the term"))
+    check("a section label is rejected",
+          not _is_quotable("Why it matters: Trump's push to rebrand AI as"))
+    check("another section label is rejected",
+          not _is_quotable("clashes with established terminology. What they're saying:"))
+    check("a dangling conjunction is rejected",
+          not _is_quotable("and the vast majority of adults say it is important"))
+    check("a real quote survives",
+          _is_quotable("We will keep AI under human control"))
+
+
 def test_publisher_identity() -> None:
     """Aggregator redirects must not collapse many outlets into one publisher."""
     print("\n[verify_news] publisher identity behind aggregator links")
@@ -1892,6 +2085,11 @@ if __name__ == "__main__":
     test_install_paths()
     test_internal_links()
     test_primary_source_detection()
+    test_social_reposts_are_not_publishers()
+    test_suggestions_and_slug_hygiene()
+    test_announcements_sort_below_news()
+    test_wire_copy_is_one_publisher()
+    test_quote_fragments_are_dropped()
     test_fact_dedupe_and_figure_labels()
     test_aeo_audit()
     test_seo_audit()

@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .paths import data_dir, default_output_dir, dotenv_path
+from .httpfetch import BROWSER_UA
 
 load_dotenv(dotenv_path())
 
@@ -62,11 +63,11 @@ class Config:
     output_dir: Path = field(
         default_factory=lambda: (Path(_env("OUTPUT_DIR")).expanduser()
                                  if _env("OUTPUT_DIR") else default_output_dir()))
+    # A browser UA, not a product token. `(compatible; Product/1.0)` is what
+    # every CDN bot rule matches on, and it is why AP returned 403 to every
+    # fetch this server made.
     user_agent: str = field(
-        default_factory=lambda: _env(
-            "HTTP_USER_AGENT", "Mozilla/5.0 (compatible; NewsBlogMCP/0.1)"
-        )
-    )
+        default_factory=lambda: _env("HTTP_USER_AGENT", BROWSER_UA))
     http_timeout: float = 25.0
     # Search providers get a shorter leash: six calls at 25s each is a two-minute
     # wait before anything is printed, which reads as a hang.
@@ -96,8 +97,15 @@ class Config:
                 "serper": bool(self.serper_api_key),
                 "google_cse": bool(self.google_cse_key and self.google_cse_id),
                 "newsapi": bool(self.newsapi_key),
-                "keyless": ["gdelt", "bing_rss", "google_rss"],
+                "keyless": ["publisher_feeds", "gdelt", "bing_rss", "google_rss"],
+                "keyless_note": (
+                    "publisher_feeds reads ~47 technology, AI and security "
+                    "outlets' own RSS feeds and is the only keyless provider "
+                    "that returns URLs the server can actually open. The others "
+                    "return aggregator redirects or rate-limit."),
                 "forced_provider": self.search_provider or None,
+                "note": ("A true here means a key string is present, NOT that it "
+                         "works. Call capabilities(probe=True) to test them."),
             },
             "humanize_llm": {
                 "anthropic": bool(self.anthropic_api_key),

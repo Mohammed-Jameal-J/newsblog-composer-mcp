@@ -174,6 +174,103 @@ def _dedupe_phrases(ranked: list[str], limit: int) -> list[str]:
     return kept
 
 
+# Words that carry no meaning in a slug or a title cut.
+_SLUG_STOP = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
+    "has", "have", "in", "into", "is", "it", "its", "of", "on", "or", "over",
+    "that", "the", "their", "this", "to", "was", "were", "will", "with",
+    "after", "amid", "says", "said", "new", "more", "than", "confirms",
+    "confirmed", "reports", "reported", "announces", "announced",
+}
+
+# Autocomplete on a company name is dominated by people researching the company
+# as an investment or an employer. Those questions belong on an "about" page,
+# not inside a news article about an incident, and an FAQ full of them reads as
+# filler to a reader and as off-topic to an answer engine.
+_PROFILE_QUERY = (
+    "share price", "stock", "shares", "revenue", "market cap", "earnings",
+    "dividend", "careers", "career", "jobs", "salary", "hiring", "interview",
+    "employees", "headquarters", "ceo", "founder", "who owns", "competitors",
+    "customers", "good company", "good stock", "publicly traded", "ticker",
+    "wikipedia", "logo", "products", "subsidiaries",
+)
+
+
+def _is_company_profile_query(query: str) -> bool:
+    low = (query or "").lower()
+    return any(token in low for token in _PROFILE_QUERY)
+
+
+# Long words that say nothing about which story this is. Length alone picked
+# "information" over "ransomware" out of the same headline, which would have
+# seeded the FAQ with the wrong subject - so generic nouns are excluded before
+# length decides.
+_GENERIC_WORDS = {
+    "information", "personal", "details", "company", "companies", "business",
+    "customers", "customer", "service", "services", "system", "systems",
+    "people", "percent", "million", "billion", "trillion", "government",
+    "international", "national", "following", "according", "statement",
+    "announcement", "general", "several", "number", "numbers", "report",
+    "reports", "update", "updates", "latest", "recent", "current", "month",
+    "months", "years", "today", "yesterday", "week", "weeks", "could", "would",
+    "after", "before", "during", "about", "their", "these", "those", "which",
+    "where", "while", "first", "second", "third", "major", "large", "small",
+}
+
+
+def _story_word(title: str, primary: str) -> str:
+    """The word that says which story this is, not just which company.
+
+    For "Advantest confirms personal information stolen in ransomware attack"
+    with primary "advantest", this is "ransomware". That is what turns a seed
+    about a company into one about the event, and it is the difference between
+    an FAQ asking what was stolen and an FAQ asking about the share price.
+    """
+    brand = set(tokens(primary))
+    best = ""
+    for word in re.findall(r"[a-zA-Z]{5,}", title or ""):
+        low = word.lower()
+        if low in brand or low in _SLUG_STOP or low in _GENERIC_WORDS:
+            continue
+        if len(low) > len(best):
+            best = low
+    return best
+
+
+def _fit(text: str, limit: int) -> str:
+    """Cut to a length on a word boundary, with no trailing ellipsis.
+
+    A meta title ending in "..." is not shortened, it is broken: the ellipsis
+    spends three of the characters it was meant to save and tells a reader the
+    title was cut rather than what the page is about.
+    """
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rstrip()
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,.;:-")
+
+
+def _short_slug(title: str, primary: str, max_words: int = 7) -> str:
+    """A slug the audit will actually pass.
+
+    slugify kept every word, so a headline produced a nine word slug while this
+    module's own check demands three to eight. Stopwords go first, because they
+    carry nothing for a reader or a crawler, and the brand is kept at the front.
+    """
+    words = [w for w in re.findall(r"[a-zA-Z0-9]+", (title or "").lower())
+             if w not in _SLUG_STOP]
+    if not words:
+        return slugify(title)
+    brand = [w for w in tokens(primary) if w in words]
+    rest = [w for w in words if w not in brand]
+    picked = (brand + rest)[:max_words]
+    ordered = [w for w in words if w in picked][:max_words]
+    return "-".join(ordered) or slugify(title)
+
+
 def seo_keywords(
     title: str,
     texts: list[str] | None = None,
@@ -251,15 +348,28 @@ def seo_keywords(
 
     long_tail, questions, suggest_errors = ([], [], [])
     if include_suggestions:
-        long_tail, questions, suggest_errors = expand(primary, cfg)
+        # Seeding autocomplete with the brand alone returns what investors type,
+        # not what readers of this story type: for a breach article it came back
+        # with "share price", "revenue" and "is it a good stock to buy". The
+        # story's own distinctive word is added as a second seed, and the
+        # company-profile shapes are filtered out of what comes back.
+        topical = _story_word(title, primary)
+        seeds = [primary] + ([f"{primary} {topical}"] if topical else [])
+        for seed in seeds:
+            lt, qs, errs = expand(seed, cfg)
+            long_tail += [x for x in lt if x not in long_tail]
+            questions += [x for x in qs if x not in questions]
+            suggest_errors += errs
+        long_tail = [q for q in long_tail if not _is_company_profile_query(q)][:20]
+        questions = [q for q in questions if not _is_company_profile_query(q)][:20]
 
-    meta_title = title if len(title) <= 60 else title[:57].rsplit(" ", 1)[0] + "..."
+    meta_title = _fit(title, 60)
     first_sentence = re.split(r"(?<=[.!?])\s", body.strip())[0] if body.strip() else title
     meta_description = normalize(first_sentence)
     if primary.lower() not in meta_description.lower():
         meta_description = f"{primary.capitalize()}: {meta_description}"
     if len(meta_description) > 155:
-        meta_description = meta_description[:152].rsplit(" ", 1)[0] + "..."
+        meta_description = _fit(meta_description, 155)
 
     return {
         "primary_keyword": primary,
@@ -270,7 +380,7 @@ def seo_keywords(
         # The title alone. Prepending the primary keyword stuffed the slug and
         # pushed the words that identify the story past the length limit:
         # "safety-standards-openai-cancels-gpt-6-1-astra-release-over-safety-conc".
-        "suggested_slug": slugify(title),
+        "suggested_slug": _short_slug(title, primary),
         "suggested_meta_title": meta_title,
         "suggested_meta_description": meta_description,
         "suggestion_errors": suggest_errors,

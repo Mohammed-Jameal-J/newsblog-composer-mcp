@@ -7,6 +7,7 @@ the keyless RSS providers keep the server useful with no credentials at all.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Iterable
@@ -55,6 +56,12 @@ def _iso(value) -> str:
 
 
 _LAST_CALL: dict[str, float] = {}
+
+# GDELT responses, keyed by the query that produced them, and the point in time
+# before which GDELT should not be called again. A list rather than a float so
+# the module-level value can be reassigned from inside a method.
+_GDELT_CACHE: dict[tuple, dict] = {}
+_GDELT_COOLDOWN: list[float] = [0.0]
 
 
 def _client(cfg: Config, timeout: float | None = None) -> httpx.Client:
@@ -265,16 +272,41 @@ class Gdelt(SearchProvider):
                   "maxrecords": min(max(limit, 10), 75), "format": "json",
                   "sort": "DateDesc",
                   "timespan": f"{days}d" if days else self.cfg.gdelt_timespan}
-        with _client(self.cfg, self.timeout) as c:
-            r = c.get("https://api.gdeltproject.org/api/v2/doc/doc", params=params)
-            if r.status_code == 429:
-                time.sleep(6)
+
+        # GDELT is free and keyless, which means the limit is shared with
+        # everyone else on this address. Once it starts refusing, it keeps
+        # refusing for a while, and sleeping six seconds per call to be told so
+        # again just makes every tool in the pipeline slower. Remember the
+        # refusal and step aside until the cooldown passes.
+        now = time.monotonic()
+        if now < _GDELT_COOLDOWN[0]:
+            raise RuntimeError(
+                f"GDELT is rate-limiting this address; skipped for another "
+                f"{int(_GDELT_COOLDOWN[0] - now)}s")
+
+        key = (params["query"], str(params["timespan"]), int(params["maxrecords"]))
+        cached = _GDELT_CACHE.get(key)
+        if cached and now - cached[0] < 300.0:
+            data = cached[1]
+        else:
+            with _client(self.cfg, self.timeout) as c:
                 r = c.get("https://api.gdeltproject.org/api/v2/doc/doc", params=params)
-            r.raise_for_status()
-            try:
-                data = r.json()
-            except Exception as exc:  # GDELT returns plain-text errors on bad queries
-                raise RuntimeError(f"GDELT did not return JSON: {r.text[:160]}") from exc
+                for wait in (6, 12):
+                    if r.status_code != 429:
+                        break
+                    time.sleep(wait)
+                    r = c.get("https://api.gdeltproject.org/api/v2/doc/doc", params=params)
+                if r.status_code == 429:
+                    _GDELT_COOLDOWN[0] = time.monotonic() + 120.0
+                    raise RuntimeError(
+                        "GDELT returned 429 after two retries; backing off for 120s. "
+                        "Other providers are unaffected.")
+                r.raise_for_status()
+                try:
+                    data = r.json()
+                except Exception as exc:  # GDELT returns plain-text errors on bad queries
+                    raise RuntimeError(f"GDELT did not return JSON: {r.text[:160]}") from exc
+            _GDELT_CACHE[key] = (time.monotonic(), data)
         hits = []
         for item in data.get("articles", [])[:limit]:
             url = item.get("url", "")
@@ -379,16 +411,42 @@ class BingNewsRss(_RssProvider):
         return hits
 
 
+class PublisherFeeds(SearchProvider):
+    """Keyless. Reads ~47 technology, AI and security publishers' own RSS feeds.
+
+    Unlike every other keyless provider, the links are the articles themselves -
+    no redirector to unwrap, no quota, no key. It only sees stories the listed
+    outlets covered, so it answers strongly on its beat and silently on anything
+    else, which is the right failure: a miss costs nothing, and the other
+    providers are still running.
+    """
+
+    name = "publisher_feeds"
+    keyless = True
+    # The feeds are the same regardless of phrasing and are cached for five
+    # minutes, so running query variants against them buys nothing.
+    max_queries = 1
+
+    def available(self) -> bool:
+        return True
+
+    def search(self, query: str, limit: int = 10, days: int | None = None) -> list[SearchHit]:
+        from .feeds import search_feeds
+        hits, _report = search_feeds(query, limit=limit, cfg=self.cfg)
+        return [SearchHit(**hit) for hit in hits]
+
+
 # Order matters: keyed providers first (more reliable, higher limits), then the
-# keyless ones. GDELT leads the keyless group because it is an official API
-# rather than an RSS endpoint that can change shape without notice.
-# GDELT leads the keyless group: it is an official API and the only keyless
-# provider that returns fetchable publisher URLs. Google News RSS follows
-# because it reliably names the real publisher even though its links are
-# redirects, which is what corroboration counting needs. Bing RSS is last; it
-# frequently returns nothing.
+# keyless ones.
+#
+# Among the keyless providers, publisher_feeds leads, because it is the only one
+# that reliably returns a URL the server can open. GDELT follows - an official
+# API that returns real links but rate-limits hard, being free and shared.
+# Google News RSS is next: its links are redirects wrapping an opaque id, so it
+# contributes publisher names for corroboration counting rather than sources.
+# Bing RSS is last; its links unwrap cleanly but it frequently returns nothing.
 _ALL = [Tavily, BraveNews, SerperNews, GoogleCustomSearch, NewsApiOrg,
-        Gdelt, GoogleNewsRss, BingNewsRss]
+        PublisherFeeds, Gdelt, GoogleNewsRss, BingNewsRss]
 _BY_NAME = {cls.name: cls for cls in _ALL}
 
 
@@ -404,28 +462,103 @@ def build_providers(cfg: Config | None = None) -> list[SearchProvider]:
     return [p for p in (cls(cfg) for cls in _ALL) if p.available()]
 
 
-def gather(queries: Iterable[str], cfg: Config | None = None, limit: int = 10,
-           days: int | None = None) -> tuple[list[SearchHit], list[dict]]:
-    """Run every available provider over every query. Returns (hits, provider_log)."""
+_KEYED = (Tavily, BraveNews, SerperNews, GoogleCustomSearch, NewsApiOrg)
+
+
+def probe_keys(cfg: Config | None = None) -> dict:
+    """Ask each keyed provider one real question and report what it said.
+
+    Reporting a key as present because a string exists in the environment is how
+    this server spent a day looking healthy while every search returned 401. A
+    key is a claim about access, and the only thing that settles it is a request.
+
+    Three states, kept distinct because the fix differs for each:
+
+      absent    - nothing configured. Expected, and fine: the keyless providers
+                  carry the server. Not an error and not reported as one.
+      rejected  - a key is configured and the provider refused it. This is the
+                  one a user must act on; it is silent failure otherwise.
+      working   - the provider answered.
+    """
     cfg = cfg or CONFIG
-    providers = build_providers(cfg)
+    out: dict[str, dict] = {}
+    for cls in _KEYED:
+        provider = cls(cfg)
+        if not provider.available():
+            out[cls.name] = {"configured": False, "status": "absent"}
+            continue
+        try:
+            found = provider.search("technology", limit=3)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            refused = any(token in detail for token in
+                          ("401", "403", "Unauthorized", "Forbidden", "invalid api key"))
+            out[cls.name] = {
+                "configured": True,
+                "status": "rejected" if refused else "error",
+                "detail": detail[:220],
+                "what_to_do": ("The key is present but the provider refused it. Replace it "
+                               "in the extension settings and restart the client."
+                               if refused else
+                               "The provider is configured but did not answer; it may be "
+                               "down. The keyless providers still work."),
+            }
+        else:
+            out[cls.name] = {"configured": True, "status": "working",
+                             "results_returned": len(found)}
+    return out
+
+
+def _run_one(provider: SearchProvider, query_list: list[str], limit: int,
+             days: int | None) -> tuple[list[SearchHit], list[dict]]:
+    """Every query for a single provider, in order, respecting its rate limit."""
     hits: list[SearchHit] = []
     log: list[dict] = []
+    for query in query_list[:provider.max_queries]:
+        if provider.min_interval:
+            since = time.time() - _LAST_CALL.get(provider.name, 0.0)
+            if since < provider.min_interval:
+                time.sleep(provider.min_interval - since)
+        _LAST_CALL[provider.name] = time.time()
+        started = time.time()
+        try:
+            found = provider.search(query, limit=limit, days=days)
+            hits.extend(found)
+            log.append({"provider": provider.name, "query": query, "ok": True,
+                        "count": len(found), "ms": int((time.time() - started) * 1000)})
+        except Exception as exc:  # a dead provider must not kill the call
+            log.append({"provider": provider.name, "query": query, "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}"})
+    return hits, log
+
+
+def gather(queries: Iterable[str], cfg: Config | None = None, limit: int = 10,
+           days: int | None = None) -> tuple[list[SearchHit], list[dict]]:
+    """Run every available provider over every query. Returns (hits, provider_log).
+
+    Providers run concurrently. They were sequential, which made the total wait
+    the sum of every provider's latency: a search key at three seconds, the feed
+    sweep at five, GDELT's rate-limit pause at five more, and two RSS endpoints
+    on top. On a cold cache that crossed sixty seconds and the call timed out
+    before anything came back.
+
+    Nothing here depends on anything else, so the honest cost is the slowest
+    provider, not the sum. Each provider keeps its own queries in order inside
+    its thread, so per-provider rate limits still hold, and results are
+    collected in submission order so the log reads the same every time.
+    """
+    cfg = cfg or CONFIG
+    providers = build_providers(cfg)
     query_list = list(queries)
-    for provider in providers:
-        for query in query_list[:provider.max_queries]:
-            if provider.min_interval:
-                since = time.time() - _LAST_CALL.get(provider.name, 0.0)
-                if since < provider.min_interval:
-                    time.sleep(provider.min_interval - since)
-            _LAST_CALL[provider.name] = time.time()
-            started = time.time()
-            try:
-                found = provider.search(query, limit=limit, days=days)
-                hits.extend(found)
-                log.append({"provider": provider.name, "query": query, "ok": True,
-                            "count": len(found), "ms": int((time.time() - started) * 1000)})
-            except Exception as exc:  # a dead provider must not kill the call
-                log.append({"provider": provider.name, "query": query, "ok": False,
-                            "error": f"{type(exc).__name__}: {exc}"})
+    hits: list[SearchHit] = []
+    log: list[dict] = []
+    if not providers:
+        return hits, log
+    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+        futures = [pool.submit(_run_one, p, query_list, limit, days)
+                   for p in providers]
+        for future in futures:
+            found, entries = future.result()
+            hits.extend(found)
+            log.extend(entries)
     return hits, log

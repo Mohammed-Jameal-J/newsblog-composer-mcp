@@ -34,3 +34,12 @@ $null
 assets/logo-source.png
 assets/logo-600.png
 assets/make_icon.py
+
+# The live post index. Runtime data, not source: it carries the slugs and
+# URLs of posts the installing user has written. It belongs in the data
+# directory, never in the package or the repo.
+post_index.json
+
+# pytest scratch. Created by running the suite in the repo; it is not source
+# and has no business in the package.
+.pytest_cache/

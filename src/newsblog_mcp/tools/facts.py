@@ -12,6 +12,8 @@ import re
 import httpx
 
 from ..config import CONFIG, Config
+from ..httpfetch import fetch_html
+from ..providers.feeds import cached_article
 from ..textutil import normalize, registrable_domain, sentences
 
 _BOILERPLATE = re.compile(
@@ -54,12 +56,45 @@ def _looks_like_fact(sentence: str) -> bool:
     return has_number or has_proper
 
 
+# Section labels used by newsrooms that write in blocks. Text captured between
+# quote marks around them is page furniture, not something a person said.
+_SECTION_LABELS = (
+    "why it matters", "what they're saying", "what they are saying",
+    "zoom out", "zoom in", "yes, but", "the big picture", "go deeper",
+    "what we're watching", "what we are watching", "driving the news",
+    "by the numbers", "between the lines", "the bottom line", "catch up quick",
+)
+
+
+def _is_quotable(quote: str) -> bool:
+    """Whether this looks like something a person actually said.
+
+    The regex matches anything between quote marks, and on a page that uses
+    typographic quotes for emphasis that produced fragments like
+    "- even as the White House continues using the term", attributed to the
+    publisher's domain. A fragment handed to a writer as a quote is an invitation
+    to print it, so these are dropped rather than passed along hedged.
+    """
+    low = quote.lower()
+    if any(label in low for label in _SECTION_LABELS):
+        return False
+    # A real quote opens on a word, not on punctuation or a dangling conjunction.
+    if not quote[:1].isalnum() and quote[:1] not in "'\u2018":
+        return False
+    if low.split(" ", 1)[0] in {"and", "but", "or", "so", "because", "which",
+                                "that", "even", "though", "while"}:
+        return False
+    return True
+
+
 def _extract_quotes(text: str, fallback_attrib: str) -> list[dict]:
     out = []
     for match in _QUOTE_RE.finditer(text):
         quote = normalize(match.group(1))
         words = quote.split()
         if not (4 <= len(words) <= 15):
+            continue
+        if not _is_quotable(quote):
             continue
         window = text[match.end(): match.end() + 120]
         before = text[max(0, match.start() - 120): match.start()]
@@ -110,17 +145,23 @@ def fetch_article_facts(
     figures: list[dict] = []
     per_url: list[dict] = []
 
-    headers = {"User-Agent": cfg.user_agent, "Accept-Language": "en-US,en;q=0.9"}
-    with httpx.Client(timeout=cfg.http_timeout, follow_redirects=True, headers=headers) as client:
+    with httpx.Client(timeout=cfg.http_timeout, follow_redirects=True) as client:
         for url in urls:
             record = {"url": url, "ok": False, "error": None, "chars": 0,
                       "title": "", "author": "", "date": ""}
-            try:
-                response = client.get(url)
-                response.raise_for_status()
-                html = response.text
-            except Exception as exc:
-                record["error"] = f"fetch failed: {type(exc).__name__}: {exc}"
+            # Headers live in httpfetch because being refused by a publisher is
+            # a policy answer, not a transport failure, and the retry that gets
+            # past it is the same for every caller.
+            html, error = fetch_html(client, url, cfg.user_agent)
+            if error:
+                # The page said no. Ask the publisher's own feed, which is the
+                # same article published in a format meant for machines.
+                html = cached_article(url)
+                if html:
+                    record["source"] = "publisher feed (article page refused the fetch)"
+                    error = ""
+            if error:
+                record["error"] = error
                 per_url.append(record)
                 continue
 
