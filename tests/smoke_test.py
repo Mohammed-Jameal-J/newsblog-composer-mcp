@@ -565,6 +565,50 @@ def test_one_outlet_is_not_two_publishers() -> None:
           out["is_legit"] is False, str(out["is_legit"]))
 
 
+def test_cli_reads_prose_back_into_structure() -> None:
+    """The free path hands the writing to somebody else's chatbot.
+
+    Every way into Claude is gated behind a paid plan, so the model becomes the
+    user's to supply by pasting. That means prose has to come back as structure,
+    and a draft that silently mis-parses would publish a broken post - so the
+    parser reports what it could not find rather than guessing.
+    """
+    print("\n[cli] a pasted draft becomes a post, or says why not")
+    from newsblog_mcp.cli import parse_draft
+
+    good = parse_draft(
+        "First intro paragraph, long enough to count.\n\n"
+        "Second intro paragraph.\n\n"
+        "## What happened?\nOne.\n\nTwo.\n\n"
+        "## Why did it take so long?\nThree.\n\nFour.\n\n"
+        "## Frequently Asked Questions\n"
+        "### What happened?\nThey were breached.\n"
+        "### When?\nIn February.\n"
+        "### What was taken?\nRecords.\n"
+        "### Is there a risk?\nYes.\n\n"
+        "## Call to action\nOne closing sentence.\n")
+    check("two intro paragraphs", len(good["intro"]) == 2, str(len(good["intro"])))
+    check("two body sections", len(good["sections"]) == 2, str(len(good["sections"])))
+    check("the FAQ is not treated as a section",
+          all("Frequently" not in s["heading"] for s in good["sections"]))
+    check("four FAQ pairs", len(good["faq"]) == 4, str(len(good["faq"])))
+    check("the call to action is separated", good["cta"].startswith("One closing"))
+    check("a good draft raises nothing", good["problems"] == [], str(good["problems"]))
+
+    bad = parse_draft("Only one paragraph.\n\n## One section\nText.\n")
+    check("a bad draft is refused, not guessed at", len(bad["problems"]) == 4,
+          str(bad["problems"]))
+    check("it names the intro problem",
+          any("intro" in p for p in bad["problems"]))
+    check("it names the FAQ problem",
+          any("FAQ" in p for p in bad["problems"]))
+
+    # A title line is the commonest thing a chatbot adds unasked.
+    titled = parse_draft("# A Title It Added\n\nOne.\n\nTwo.\n\n## A section\nText.\n")
+    check("a stray title line is dropped, not counted as intro",
+          len(titled["intro"]) == 2, str(titled["intro"])[:80])
+
+
 def test_publisher_identity() -> None:
     """Aggregator redirects must not collapse many outlets into one publisher."""
     print("\n[verify_news] publisher identity behind aggregator links")
@@ -2221,6 +2265,7 @@ if __name__ == "__main__":
     test_blogger_compose_warning_ships_with_the_post()
     test_checks_table_reads_its_own_inputs()
     test_one_outlet_is_not_two_publishers()
+    test_cli_reads_prose_back_into_structure()
     test_fact_dedupe_and_figure_labels()
     test_aeo_audit()
     test_seo_audit()

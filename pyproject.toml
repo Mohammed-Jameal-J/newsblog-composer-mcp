@@ -1,6 +1,6 @@
 [project]
 name = "newsblog-composer-mcp"
-version = "0.7.4"
+version = "0.8.0"
 description = "MCP server that researches, verifies and audits news blog posts. The writer writes the prose."
 readme = "README.md"
 authors = [{ name = "Mohammed Jameal J" }]
@@ -42,6 +42,9 @@ Issues = "https://github.com/Mohammed-Jameal-J/newsblog-composer-mcp/issues"
 [project.scripts]
 newsblog-composer-mcp = "newsblog_mcp.server:main"
 newsblog-mcp = "newsblog_mcp.server:main"
+# The command-line front door. Every route into Claude is gated behind a paid
+# plan; this one is not gated behind anything.
+newsblog = "newsblog_mcp.cli:main"
 
 [build-system]
 requires = ["hatchling"]

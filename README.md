@@ -9,7 +9,7 @@
 [![PyPI](https://img.shields.io/pypi/v/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/newsblog-composer-mcp)](https://pypi.org/project/newsblog-composer-mcp/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-370%20passing-brightgreen)](tests/smoke_test.py)
+[![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen)](tests/smoke_test.py)
 
 </div>
 
@@ -32,6 +32,45 @@ article, and builds the SEO, schema, banner prompt and publishing pack around it
   seo_audit            93/100, nothing must-fix
   save_and_present     the post, the checks, the image prompt, the files
 ```
+
+
+## No Claude subscription? Use it from the command line
+
+Extensions, connectors and skills are all gated behind a paid Claude plan, so
+none of them reach a free account. This does.
+
+Look at what the pipeline actually does: verification, the two-publisher rule,
+wire and reshare detection, fact extraction, keyword mining, the SEO score, the
+AEO score, the JSON-LD and the publishing pack are ordinary Python. Exactly one
+step needs a language model - writing the draft - and you already have one of
+those for free, whichever chatbot you use.
+
+So the model is yours to supply, by pasting:
+
+```bash
+pip install newsblog-composer-mcp
+
+newsblog setup                       # byline, voice, blog URL. Once.
+newsblog find "ransomware attack"    # what is worth writing about today
+newsblog brief "<headline>"          # verifies, fetches, writes brief.md
+```
+
+Paste `brief.md` into any chatbot. Save what it gives you as `draft.md`. Then:
+
+```bash
+newsblog pack draft.md --banner hardware_macro
+```
+
+That audits the draft, scores it for SEO and AEO, builds both JSON-LD blocks and
+writes the whole package, including the file you paste into Blogger.
+
+No API key is needed for technology, AI or security stories: the bundled
+publisher feeds are keyless. `newsblog doctor --probe --feeds` reports what is
+configured and what is actually reachable.
+
+The one thing it will not do is write from a story it could not verify. That
+refusal is the product, not a limitation of this entry point.
+
 
 ## What it actually guarantees
 
