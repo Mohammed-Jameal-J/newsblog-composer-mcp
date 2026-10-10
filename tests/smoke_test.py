@@ -438,6 +438,54 @@ def test_quote_fragments_are_dropped() -> None:
           _is_quotable("We will keep AI under human control"))
 
 
+def test_banner_may_carry_its_headline() -> None:
+    """The safety suffix must not forbid the one thing the banner is for.
+
+    build_publishing_pack writes "Text to render on the image, spelled exactly
+    as written" so the headline appears on the banner. sanitize_prompt then
+    appended "No text" to every prompt, so the two tools cancelled out and the
+    banner could never carry a word. Brands and real faces stay forbidden.
+    """
+    print("\n[generate_image] the headline may be drawn, the trademark may not")
+    from newsblog_mcp.providers.imagegen import sanitize_prompt
+
+    with_text, _ = sanitize_prompt(
+        'Gloved hands at a test rig. Headline text in upper left reading '
+        '"Personal data stolen in ransomware attack".')
+    check("a prompt asking for text is not told to omit text",
+          "no text" not in with_text.lower(), with_text[-90:])
+    check("brands are still forbidden", "no logos" in with_text.lower())
+    check("real people are still forbidden", "no real people" in with_text.lower())
+
+    without_text, _ = sanitize_prompt(
+        "A locked server cabinet in a clean room, shallow depth of field.")
+    check("a prompt not asking for text still bans garbled lettering",
+          "no text" in without_text.lower(), without_text[-90:])
+
+
+def test_blogger_compose_warning_ships_with_the_post() -> None:
+    """Compose view deletes the schema, and the warning has to travel with it.
+
+    Blogger strips <script> from the post body in Compose view. Both JSON-LD
+    blocks live there, so one switch removes the structured data from the saved
+    post while the article still looks perfect. Whoever pastes this days from
+    now is not reading a tool description, so the warning lives in the file.
+    """
+    print("\n[save_and_present] the Compose view warning travels with the package")
+    from newsblog_mcp.tools.save import BLOGGER_PASTE_NOTE
+
+    low = BLOGGER_PASTE_NOTE.lower()
+    check("it names the view that does the damage", "compose" in low)
+    check("it names what is removed", "script" in low)
+    check("it says to paste in HTML view", "html view" in low)
+    check("it explains the failure is silent",
+          "nothing warns you" in low or "silently" in low)
+    check("it gives the theme-level alternative",
+          "edit html" in low and "head" in low)
+    check("it points at the script-free body for Compose users",
+          "body.html" in low)
+
+
 def test_publisher_identity() -> None:
     """Aggregator redirects must not collapse many outlets into one publisher."""
     print("\n[verify_news] publisher identity behind aggregator links")
@@ -2090,6 +2138,8 @@ if __name__ == "__main__":
     test_announcements_sort_below_news()
     test_wire_copy_is_one_publisher()
     test_quote_fragments_are_dropped()
+    test_banner_may_carry_its_headline()
+    test_blogger_compose_warning_ships_with_the_post()
     test_fact_dedupe_and_figure_labels()
     test_aeo_audit()
     test_seo_audit()

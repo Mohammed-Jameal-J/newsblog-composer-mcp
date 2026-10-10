@@ -375,7 +375,8 @@ def save_and_present(
         from .pack import render_pack_markdown
         pack_path = folder / "publish-pack.md"
         try:
-            pack_path.write_text(render_pack_markdown(pack), encoding="utf-8")
+            pack_path.write_text(render_pack_markdown(pack) + BLOGGER_PASTE_NOTE,
+                                 encoding="utf-8")
             written.append(str(pack_path))
         except Exception as exc:  # noqa: BLE001 - see below
             # A caller handing back a reshaped pack used to raise here and take
@@ -463,6 +464,10 @@ def save_and_present(
         "next_step": (
             "After showing the post: paste-into-blogger.html goes into the post's "
             "HTML view - it carries both JSON-LD blocks and the styled body. "
+            "Tell the user to paste it in HTML view and NOT to switch to Compose "
+            "afterwards: Compose strips <script> elements, so one switch silently "
+            "deletes both JSON-LD blocks from the saved post. publish-pack.md "
+            "spells this out, with the safer theme-level alternative. "
             "publish-pack.md has the same title, labels and permalink in a file, "
             "and report.md summarises the verification, human score and SEO score."
         ),
@@ -563,6 +568,66 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
     ]
 
 
+
+# Blogger has two editor views and they are not equivalent. The HTML view keeps
+# what you paste. The Compose view sanitises the body and drops <script>
+# elements, which is exactly where both JSON-LD blocks live. Switching views
+# once after pasting removes the structured data from the saved post, and
+# nothing says so: the article still reads correctly, the styling survives, and
+# only the rich result quietly stops working.
+#
+# This goes in the file that ships beside the post rather than in a tool
+# description, because it is needed at the moment of pasting, days later,
+# by someone who is not reading this code.
+BLOGGER_PASTE_NOTE = """
+
+---
+
+## Pasting this into Blogger
+
+**Switch to HTML view before you paste anything.** New post, then the `<>` /
+HTML toggle, then paste the whole of `paste-into-blogger.html`.
+
+Then fill in, from this file:
+
+| Blogger field | Use |
+|---|---|
+| Post title | the Title above |
+| Labels | the Labels line above |
+| Permalink | Custom Permalink, the slug above |
+| Search Description | the meta description above |
+
+Publish from the HTML view.
+
+### Do not switch to Compose view after pasting
+
+Compose view strips `<script>` elements out of the post body. Both JSON-LD
+blocks live in `<script type="application/ld+json">`, so one switch deletes
+your structured data from the saved post.
+
+Nothing warns you. The article text is unchanged, the banner is unchanged, the
+inline styling is unchanged, the headings and the FAQ all still look right. The
+only thing that changed is that Google no longer sees a NewsArticle or an
+FAQPage, and the rich result stops appearing.
+
+### If you want to edit the text later
+
+Edit in **HTML view**. If you have already edited in Compose, re-paste the two
+blocks from `newsarticle.jsonld` and `faqpage.jsonld` at the very top of the
+HTML view before publishing again.
+
+### The safer arrangement
+
+If you expect to edit posts in Compose, keep the schema out of the post
+entirely:
+
+1. Paste `body.html` (the article with no `<script>` blocks) into Compose.
+2. Put the schema in your theme instead: **Theme -> Edit HTML**, inside
+   `<head>`.
+
+Schema in the theme survives every edit to every post. Schema in the post body
+only survives if nobody opens Compose.
+"""
 
 def _panel_html(pack: dict, meta: dict, folder: Path, checks: list[str]) -> str:
     """The publishing details, rendered into the preview page itself.

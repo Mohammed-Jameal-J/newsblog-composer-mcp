@@ -196,9 +196,43 @@ _PROFILE_QUERY = (
 )
 
 
-def _is_company_profile_query(query: str) -> bool:
+# Words that cannot end a title or a description: they point forward at
+# something that has been cut off.
+_DANGLING = {
+    "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "for",
+    "with", "from", "by", "as", "that", "this", "its", "their", "is", "are",
+    "was", "were", "be", "been", "has", "have", "had", "after", "before",
+    "into", "over", "under", "about", "than", "then", "so", "if", "when",
+}
+
+# Question shapes that ask who a company IS rather than what happened. The
+# filter below removed "advantest share price" and left "what is advantest",
+# "what does advantest do" and "is advantest a japanese company" - which would
+# put an about-us FAQ inside a breach report. Those belong on a company page.
+_IDENTITY_FILLER = {
+    "what", "who", "which", "where", "when", "why", "how", "is", "are", "was",
+    "does", "do", "did", "can", "will", "a", "an", "the", "of", "in", "on",
+    "to", "for", "and", "or", "company", "companies", "corp", "corporation",
+    "inc", "ltd", "llc", "group", "make", "makes", "making", "doing", "good",
+    "bad", "best", "about", "mean", "means", "stand", "stands",
+    # Nationality and status adjectives. "is advantest a japanese company" is
+    # still an about-us question even though "japanese" carries meaning.
+    "japanese", "american", "chinese", "korean", "indian", "german", "french",
+    "british", "european", "dutch", "swiss", "israeli", "taiwanese",
+    "public", "private", "listed", "owned", "real", "legit", "legitimate",
+    "safe", "reliable", "big", "large", "small", "famous", "known", "worth",
+}
+
+
+def _is_company_profile_query(query: str, brand: str = "") -> bool:
     low = (query or "").lower()
-    return any(token in low for token in _PROFILE_QUERY)
+    if any(token in low for token in _PROFILE_QUERY):
+        return True
+    # Strip the brand, the question words and the generic company nouns. If
+    # nothing is left, the question is about the company's identity and not
+    # about this story.
+    rest = tokens(low) - tokens(brand) - _IDENTITY_FILLER
+    return not rest
 
 
 # Long words that say nothing about which story this is. Length alone picked
@@ -250,7 +284,17 @@ def _fit(text: str, limit: int) -> str:
     cut = text[:limit].rstrip()
     if " " in cut:
         cut = cut.rsplit(" ", 1)[0]
-    return cut.rstrip(" ,.;:-")
+    cut = cut.rstrip(" ,.;:-")
+    # Cutting on a word boundary is not enough. "Advantest confirms personal
+    # information stolen in" ends on a preposition that promises a noun which
+    # never arrives, which reads as broken rather than shortened. Drop trailing
+    # function words until the last word carries meaning.
+    while True:
+        parts = cut.rsplit(" ", 1)
+        if len(parts) < 2 or parts[1].lower() not in _DANGLING:
+            break
+        cut = parts[0].rstrip(" ,.;:-")
+    return cut
 
 
 def _short_slug(title: str, primary: str, max_words: int = 7) -> str:
@@ -360,8 +404,10 @@ def seo_keywords(
             long_tail += [x for x in lt if x not in long_tail]
             questions += [x for x in qs if x not in questions]
             suggest_errors += errs
-        long_tail = [q for q in long_tail if not _is_company_profile_query(q)][:20]
-        questions = [q for q in questions if not _is_company_profile_query(q)][:20]
+        long_tail = [q for q in long_tail
+                     if not _is_company_profile_query(q, primary)][:20]
+        questions = [q for q in questions
+                     if not _is_company_profile_query(q, primary)][:20]
 
     meta_title = _fit(title, 60)
     first_sentence = re.split(r"(?<=[.!?])\s", body.strip())[0] if body.strip() else title

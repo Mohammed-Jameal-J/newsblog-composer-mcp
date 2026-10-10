@@ -83,8 +83,22 @@ def sanitize_prompt(prompt: str) -> tuple[str, list[str]]:
         removed.append("logo/brand-mark request")
         safe = _BRAND_HINT.sub("abstract symbol", safe)
     safe = re.sub(r"\s{2,}", " ", safe).strip().rstrip(".,;: ")
-    safe += (". No text, no logos, no brand marks, no recognisable trademarks, "
+    # "No text" used to be in this list, which contradicted the only prompt the
+    # server actually generates: build_publishing_pack writes "Text to render on
+    # the image, spelled exactly as written" so the banner carries the headline.
+    # Forbidding text here meant the banner could never do its job. What must
+    # stay forbidden is somebody else's property and somebody else's face.
+    #
+    # When the caller has not asked for any lettering, text is still unwanted -
+    # a model left to itself scribbles garbled pseudo-words - so the ban is
+    # applied only when no text was requested.
+    wants_text = re.search(
+        r"\btext\b|\bheadline\b|\bcaption\b|\blettering\b|\btitle\b|"
+        r"\bwords?\b|\breading\b|\bspelled\b|\btypography\b", safe, re.I)
+    safe += (". No logos, no brand marks, no recognisable trademarks, "
              "no real people.")
+    if not wants_text:
+        safe += " No text or lettering of any kind."
     return safe, sorted(set(removed))
 
 
