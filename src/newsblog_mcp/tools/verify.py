@@ -148,7 +148,11 @@ def _publisher_key(hit: SearchHit) -> str:
         return f"wire:{wire.lower()}"
     domain = registrable_domain(hit.url)
     if not hit.fetchable or domain in _AGGREGATORS:
-        return _brand(hit.publisher) or "unknown"
+        # The feed's own source URL is exact where the name is a guess: no
+        # amount of string comparison turns "Investment & Pensions Europe" into
+        # "ipe.com", and those were counted as two outlets reporting one story.
+        own = registrable_domain(getattr(hit, "publisher_url", "") or "")
+        return _brand(own) or _brand(hit.publisher) or "unknown"
     return _brand(domain) or _brand(hit.publisher) or "unknown"
 
 
@@ -156,6 +160,11 @@ def _publisher_label(hit: SearchHit) -> str:
     wire = _wire_service(hit)
     if wire:
         return f"{wire} (wire copy)"
+    own = registrable_domain(getattr(hit, "publisher_url", "") or "")
+    if own and not hit.fetchable:
+        # Label it the way the reader will recognise it, having keyed on the
+        # domain: the outlet's name if the feed gave one, else the domain.
+        return hit.publisher or own
     domain = registrable_domain(hit.url)
     if not hit.fetchable or domain in _AGGREGATORS:
         return hit.publisher or "unknown"

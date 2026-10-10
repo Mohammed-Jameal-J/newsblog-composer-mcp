@@ -444,7 +444,17 @@ def save_and_present(
             "order the user wants them. Do not summarise it, do not drop lines "
             "from it, do not shorten the article, and do not replace it with a "
             "list of what the post covers. Add your own notes after it, never "
-            "instead of it."
+            "instead of it.\n\n"
+            "3. Immediately after the Checks table, print the whole of "
+            "`paste_block` inside a fenced ```html code block. This is the "
+            "delivery, not a convenience: the chat code block has a copy button, "
+            "so the user copies it in one click and pastes it into Blogger's HTML "
+            "view. Print it in full and do not abbreviate it - a half-copied post "
+            "is worse than none, and the JSON-LD lives at the top where a "
+            "truncation lands first. The saved folder is the backup, not the "
+            "route. Never answer 'the file is on your disk' when the user is "
+            "looking at the post: they should never have to open a file manager "
+            "to publish something this tool just finished."
         ),
         "preview_html": page,
         "preview_note": (
@@ -459,6 +469,11 @@ def save_and_present(
         "internal_link_index": index_result,
         "paths": written,
         "paste_file": str(folder / "paste-into-blogger.html"),
+        # The same bytes as paste-into-blogger.html, returned so the client can
+        # put them on screen in a code block. Sending the user to a file under
+        # AppData to find the thing they came for is a bad first experience and
+        # the commonest reason a finished post never gets published.
+        "paste_block": paste_block,
         "article_markdown": article_markdown,
         "word_count": len(article_markdown.split()),
         "next_step": (
@@ -496,13 +511,32 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
     scores = as_dict(meta.get("human_score"))
     words = len(article_markdown.split())
 
-    publishers = [str(x) for x in (verification.get("independent_publishers") or [])
-                  if str(x).strip()]
+    # verify_news calls this independent_publishers. A caller retyping meta by
+    # hand reasonably writes "publishers", or just a count. Reading one spelling
+    # printed "corroborated - 0 independent publishers" on a post with three,
+    # which is both wrong and self-contradictory. Accept the spellings people
+    # actually use, and never assert a count that was not supplied.
+    publishers: list[str] = []
+    for key in ("independent_publishers", "publishers", "sources", "outlets"):
+        value = verification.get(key)
+        if isinstance(value, list) and value:
+            publishers = [str(x) for x in value if str(x).strip()]
+            break
+    count = verification.get("publisher_count")
+    if not isinstance(count, int) or count < len(publishers):
+        count = len(publishers)
+
     if verification:
         verdict = ("corroborated" if verification.get("is_legit") else "NOT corroborated")
-        sources = (f"**{verdict}** - {len(publishers)} independent "
-                   f"publisher{'s' if len(publishers) != 1 else ''}"
-                   + (f" ({', '.join(publishers[:4])})" if publishers else ""))
+        if count:
+            sources = (f"**{verdict}** - {count} independent "
+                       f"publisher{'s' if count != 1 else ''}"
+                       + (f" ({', '.join(publishers[:4])})" if publishers else ""))
+        else:
+            # Saying "corroborated by zero publishers" is worse than admitting
+            # the number did not arrive.
+            sources = (f"**{verdict}** - publisher list not passed in "
+                       f"`meta.verification.independent_publishers`")
     else:
         sources = "_not recorded - pass the verify_news result in `meta.verification`_"
 
@@ -543,7 +577,25 @@ def _checks_table(meta: dict, article_markdown: str) -> list[str]:
         human = ("**Not measured.** Set GPTZERO_API_KEY or SAPLING_API_KEY for a real "
                  "reading.")
 
+    # find_ai_words returns its own dict, and score_ai_text repeats the result.
+    # Only one spelling in one place was read, so a run that had genuinely been
+    # checked reported "not checked". Look wherever the answer plausibly is.
     ai_words = scores.get("clean_of_ai_words")
+    if ai_words is None:
+        for holder in (as_dict(meta.get("ai_words")),
+                       as_dict(meta.get("find_ai_words")),
+                       as_dict(meta.get("stock_phrases")),
+                       meta):
+            if isinstance(holder, dict) and holder.get("clean_of_ai_words") is not None:
+                ai_words = holder.get("clean_of_ai_words")
+                scores = {**scores, "ai_word_count": holder.get("ai_word_count",
+                                                               scores.get("ai_word_count"))}
+                break
+            if isinstance(holder, dict) and holder.get("clean") is not None:
+                ai_words = holder.get("clean")
+                scores = {**scores, "ai_word_count": holder.get("count",
+                                                               scores.get("ai_word_count"))}
+                break
     if ai_words is None:
         stock = "_not checked - run find_ai_words_"
     elif ai_words:
@@ -724,8 +776,11 @@ def _display_block(folder: Path, article_markdown: str, title: str,
         "",
         "---", "",
         "### Blog content", "",
-        "The full post is in the artifact above - readable, with the code view "
-        "for the markup and JSON-LD." if article_markdown
+        "The HTML follows below in a code block. Use the copy button in its top "
+        "right, then paste it into Blogger's **HTML view** - the pencil icon "
+        "dropdown at the far left of the post toolbar. Do not switch to Compose "
+        "afterwards; Compose strips the JSON-LD. The artifact above shows the "
+        "same post laid out." if article_markdown
         else "_(no body was passed to save_and_present)_",
         "", "---", "",
     ]

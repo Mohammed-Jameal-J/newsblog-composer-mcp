@@ -28,6 +28,12 @@ class SearchHit:
     snippet: str
     provider: str
     fetchable: bool = True
+    #: The outlet's own site, when the feed names it. A Google News entry
+    #: carries <source url="https://www.ipe.com">Investment & Pensions Europe</source>,
+    #: so the redirect and a direct ipe.com link can be recognised as one
+    #: publisher instead of two. Without it they were counted separately and a
+    #: single outlet cleared the two-publisher bar on its own.
+    publisher_url: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -366,6 +372,7 @@ class GoogleNewsRss(_RssProvider):
                 snippet=strip_html(entry.get("summary", "")),
                 provider=self.name,
                 fetchable=False,
+                publisher_url=source_url,
             ))
         return hits
 

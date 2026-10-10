@@ -486,6 +486,85 @@ def test_blogger_compose_warning_ships_with_the_post() -> None:
           "body.html" in low)
 
 
+def test_checks_table_reads_its_own_inputs() -> None:
+    """A summary that misreads its inputs is worse than no summary.
+
+    Live output said "corroborated - 0 independent publishers" on a post with
+    three, and "Stock AI phrasing: not checked" on a draft find_ai_words had
+    cleared. Both came from reading exactly one spelling of one key.
+    """
+    print("\n[save_and_present] the Checks table must not contradict itself")
+    from newsblog_mcp.tools.save import _checks_table
+
+    # The spelling verify_news uses.
+    rows = " ".join(_checks_table(
+        {"verification": {"is_legit": True,
+                          "independent_publishers": ["BleepingComputer", "SecurityWeek"]}},
+        "word " * 1100))
+    check("the canonical key still works", "2 independent publishers" in rows, rows[:120])
+
+    # The spelling a human retyping meta actually writes.
+    rows = " ".join(_checks_table(
+        {"verification": {"is_legit": True,
+                          "publishers": ["The Record", "Mallory"]}},
+        "word " * 1100))
+    check("a retyped key is read too", "2 independent publishers" in rows, rows[:120])
+
+    # A count with no list.
+    rows = " ".join(_checks_table(
+        {"verification": {"is_legit": True, "publisher_count": 3}}, "word " * 1100))
+    check("a bare count is read", "3 independent publishers" in rows, rows[:120])
+
+    # Nothing passed: say so rather than assert zero.
+    rows = " ".join(_checks_table({"verification": {"is_legit": True}}, "word " * 1100))
+    check("it never claims corroboration by zero publishers",
+          "0 independent" not in rows, rows[:160])
+    check("it says what is missing instead", "not passed" in rows, rows[:160])
+
+    # find_ai_words result passed on its own rather than inside human_score.
+    rows = " ".join(_checks_table(
+        {"ai_words": {"clean_of_ai_words": True, "ai_word_count": 0}}, "word " * 1100))
+    check("a separately passed AI-word result is found",
+          "none found" in rows and "not checked" not in rows, rows[:200])
+
+
+def test_one_outlet_is_not_two_publishers() -> None:
+    """ipe.com and "Investment & Pensions Europe" are one newsroom.
+
+    A Google News redirect keys on the feed's publisher NAME while a direct link
+    keys on the DOMAIN, so the same outlet arriving through two providers was
+    counted twice - and cleared the two-publisher bar by itself. The feed hands
+    over the outlet's own URL; that is exact where the name is a guess.
+    """
+    print("\n[verify_news] the same outlet twice is still one publisher")
+    from newsblog_mcp.providers.search import SearchHit
+    from newsblog_mcp.tools import verify as verify_mod
+
+    title = "Swiss pension funds investigate potential data breach after cyber attack"
+    hits = [
+        SearchHit(title=title, url="https://www.ipe.com/swiss-pension-funds/10138867.article",
+                  publisher="ipe.com", published_date="2026-10-09T16:28:46+00:00",
+                  snippet=title, provider="publisher_feeds", fetchable=True),
+        SearchHit(title=title, url="https://news.google.com/rss/articles/CBMiAAA",
+                  publisher="Investment & Pensions Europe",
+                  published_date="2026-10-09T16:28:46+00:00", snippet=title,
+                  provider="google_rss", fetchable=False,
+                  publisher_url="https://www.ipe.com"),
+    ]
+
+    monkey = verify_mod.gather
+    verify_mod.gather = lambda *a, **k: (hits, [{"provider": "tavily", "ok": True}])
+    try:
+        out = verify_mod.verify_news(title, days=7)
+    finally:
+        verify_mod.gather = monkey
+
+    check("one outlet counts once", len(out["independent_publishers"]) == 1,
+          str(out["independent_publishers"]))
+    check("one publisher does not clear the two-publisher bar",
+          out["is_legit"] is False, str(out["is_legit"]))
+
+
 def test_publisher_identity() -> None:
     """Aggregator redirects must not collapse many outlets into one publisher."""
     print("\n[verify_news] publisher identity behind aggregator links")
@@ -2140,6 +2219,8 @@ if __name__ == "__main__":
     test_quote_fragments_are_dropped()
     test_banner_may_carry_its_headline()
     test_blogger_compose_warning_ships_with_the_post()
+    test_checks_table_reads_its_own_inputs()
+    test_one_outlet_is_not_two_publishers()
     test_fact_dedupe_and_figure_labels()
     test_aeo_audit()
     test_seo_audit()
